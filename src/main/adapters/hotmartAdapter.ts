@@ -1,4 +1,9 @@
 import {
+  fetchLiveHotmartCatalog,
+  fetchLiveHotmartPurchases,
+  resolveLiveHotmartLessonMedia,
+} from './hotmartLiveSession';
+import {
   buildAuthHeaders,
   DecryptedSession,
   IPlatformAdapter,
@@ -25,6 +30,16 @@ export class HotmartAdapter implements IPlatformAdapter {
     this.fetchFn = fetchFn;
   }
 
+  private shouldUseLiveElectronSession(session: DecryptedSession): boolean {
+    return Boolean(
+      session.partitionName &&
+        this.apiBaseUrl === 'https://api-club.hotmart.com' &&
+        this.fetchFn === fetch &&
+        process.env.NANO_OFFLINE_E2E !== '1' &&
+        Boolean(process.versions.electron),
+    );
+  }
+
   getLoginConfig(): WebBridgeConfig {
     return {
       platform: 'hotmart',
@@ -47,6 +62,10 @@ export class HotmartAdapter implements IPlatformAdapter {
   }
 
   async fetchPurchases(session: DecryptedSession): Promise<PurchaseRecord[]> {
+    if (this.shouldUseLiveElectronSession(session) && session.partitionName) {
+      return fetchLiveHotmartPurchases(session.partitionName);
+    }
+
     const candidateUrls = [
       `${this.apiBaseUrl}/my-courses`,
       ...(session.discoveredApiUrls ?? []).filter((u) =>
@@ -138,6 +157,10 @@ export class HotmartAdapter implements IPlatformAdapter {
     session: DecryptedSession,
     courseExternalId: string,
   ): Promise<RemoteCourseTree> {
+    if (this.shouldUseLiveElectronSession(session) && session.partitionName) {
+      return fetchLiveHotmartCatalog(session.partitionName, courseExternalId);
+    }
+
     const res = await this.fetchFn(
       `${this.apiBaseUrl}/courses/${encodeURIComponent(courseExternalId)}/modules`,
       {
@@ -196,6 +219,10 @@ export class HotmartAdapter implements IPlatformAdapter {
     courseExternalId: string,
     lessonExternalId: string,
   ): Promise<MediaDescriptor> {
+    if (this.shouldUseLiveElectronSession(session) && session.partitionName) {
+      return resolveLiveHotmartLessonMedia(session.partitionName, lessonExternalId);
+    }
+
     const res = await this.fetchFn(
       `${this.apiBaseUrl}/courses/${encodeURIComponent(courseExternalId)}/lessons/${encodeURIComponent(lessonExternalId)}/media`,
       {

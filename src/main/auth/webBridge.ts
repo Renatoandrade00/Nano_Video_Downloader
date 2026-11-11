@@ -6,6 +6,7 @@ export interface WebBridgeResult {
   bearerToken?: string;
   cookies: Array<{ name: string; value: string; domain: string }>;
   discoveredApiUrls?: string[];
+  partitionName?: string;
   email?: string;
   externalUserId?: string;
 }
@@ -181,6 +182,7 @@ export async function openIsolatedWebBridgeLogin(
           bearerToken,
           cookies: relevantCookies,
           discoveredApiUrls: [...discoveredApiUrls],
+          partitionName,
           email,
           externalUserId,
         });
@@ -289,6 +291,7 @@ export function buildSessionRecord(
     bearerToken: captured.bearerToken,
     cookies: captured.cookies,
     discoveredApiUrls: captured.discoveredApiUrls,
+    partitionName: captured.partitionName,
   };
 }
 

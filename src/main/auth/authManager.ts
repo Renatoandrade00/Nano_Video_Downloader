@@ -64,7 +64,11 @@ export class AuthManager {
     if (!account || account.status === 'DISCONNECTED') {
       return null;
     }
-    return this.secrets.decryptJson<DecryptedSession>(account.credentialRef);
+    const session = this.secrets.decryptJson<DecryptedSession>(account.credentialRef);
+    if (session && !session.partitionName) {
+      session.partitionName = `persist:webbridge-${account.platform}-${account.id}`;
+    }
+    return session;
   }
 
   disconnectAccount(accountId: string): void {
