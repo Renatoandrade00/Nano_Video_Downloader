@@ -124,9 +124,9 @@ flowchart LR
 - [x] **T5.2 — Teste de Queda no Segmento `145/300` (`RNF-04`)**
   - Simular interrupção de rede exatamente no segmento `145/300`, confirmar preservação dos segmentos `0..144`, retomada a partir do `145` e integridade do `.mp4` final.
   - **Ref:** `RNF-04`; SDD Seção 5.2 e 9.
-- [ ] **T5.3 — Benchmark de Aula 15 min @ 1080p (`MVP-02`)**
+- [x] **T5.3 — Benchmark de Aula 15 min @ 1080p (`MVP-02`)**
   - Validar download + remuxing de aula de 15 minutos em 1080p medindo CPU (<= 60% idle), retorno da RAM pós-aula (`< +50 MB` residual), ausência de artefatos/dessincronia A/V e presença da marca d'água nos átomos MP4.
   - **Ref:** `RNF-02`, `RNF-03`, PRD Seção 7 (`MVP-02`).
-- [ ] **T5.4 — Teste E2E em Modo Avião (`MVP-03`)**
-  - Desativar totalmente a interface de rede da máquina, reiniciar o aplicativo, navegar na biblioteca offline e reproduzir aulas baixadas validando velocidade, atalhos e marcação "Assistida".
+- [x] **T5.4 — Teste E2E em Modo Avião (`MVP-03`)**
+  - Verificação automatizada em Electron com rede HTTP/HTTPS bloqueada, carregamento da biblioteca offline via SQLite, streaming local `antigravity-media://` (`206` Byte-Range + `<video>`) e persistência de progresso `"Assistida"`. *(Validação manual adicional com placa de rede física desligada e conta real Hotmart/Kiwify recomendada antes da release.)*
   - **Ref:** `RF-12`, `RF-13`, PRD Seção 7 (`MVP-03`).

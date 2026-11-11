@@ -14,6 +14,11 @@ import { QueueAndChunkManager } from './queue/queueManager';
 import { BandwidthLimiter } from './queue/tokenBucket';
 import { VaultDatabase } from './vault/database';
 import { createElectronOsProtector, createTestProtector, SecretStore } from './vault/secretStore';
+import { enableOfflineE2ECheck } from './offlineSmokeCheck';
+
+if (process.env.NANO_USER_DATA_DIR) {
+  app.setPath('userData', process.env.NANO_USER_DATA_DIR);
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -23,6 +28,7 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       stream: true,
+      corsEnabled: true,
     },
   },
 ]);
@@ -89,11 +95,13 @@ function registerLocalMediaProtocol(vaultDb: VaultDatabase): void {
 }
 
 function createWindow(): void {
+  const isHeadlessE2E = process.env.NANO_OFFLINE_E2E === '1';
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 960,
     minHeight: 640,
+    show: !isHeadlessE2E,
     title: 'Nano Video Downloader — Google Antigravity',
     backgroundColor: '#0f172a',
     webPreferences: {
@@ -103,6 +111,10 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+
+  if (isHeadlessE2E) {
+    enableOfflineE2ECheck(mainWindow);
+  }
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {

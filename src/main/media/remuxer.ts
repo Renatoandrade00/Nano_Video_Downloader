@@ -134,7 +134,7 @@ export class DecryptionAndRemuxer {
     const machineSignature = this.secrets.signForLocalMachine(JSON.stringify(watermarkPayload));
 
     try {
-      const ffmpegArgs: string[] = ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '2'];
+      const ffmpegArgs: string[] = ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1'];
 
       if (input.tracks.hasSeparateAudio) {
         const videoStreamFile = path.join(input.stagingDir, 'merged_video.bin');
