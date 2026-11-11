@@ -31,10 +31,15 @@ export class HotmartAdapter implements IPlatformAdapter {
       loginUrl: 'https://sso.hotmart.com/login',
       successUrlPatterns: [
         /consumer\.hotmart\.com/i,
+        /purchase\.hotmart\.com/i,
+        /\.club\.hotmart\.com/i,
         /club\.hotmart\.com/i,
         /app\.hotmart\.com/i,
         /hub\.hotmart\.com/i,
         /my\.hotmart\.com/i,
+        /hotmart\.com\/.*minhas-compras/i,
+        /hotmart\.com\/.*my-purchases/i,
+        /hotmart\.com\/.*my-courses/i,
       ],
       cookieDomains: ['hotmart.com', '.hotmart.com'],
       bearerStorageKeys: ['hmAccessToken', 'access_token', 'token'],
@@ -42,38 +47,66 @@ export class HotmartAdapter implements IPlatformAdapter {
   }
 
   async fetchPurchases(session: DecryptedSession): Promise<PurchaseRecord[]> {
-    const res = await this.fetchFn(`${this.apiBaseUrl}/my-courses`, {
-      method: 'GET',
-      headers: buildAuthHeaders(session),
-    });
-    if (!res.ok) {
-      throw new Error(`Hotmart /my-courses failed with HTTP ${res.status}`);
-    }
-    const payload = (await res.json()) as {
-      items?: Array<{
-        productId?: string | number;
-        courseId?: string | number;
-        name?: string;
-        title?: string;
-        transaction?: string;
-        purchaseRef?: string;
-        status?: string;
-        coverUrl?: string;
-      }>;
-    };
+    const candidateUrls = [
+      `${this.apiBaseUrl}/my-courses`,
+      ...(session.discoveredApiUrls ?? []).filter((u) =>
+        /(purchase|my-courses|products|subscriptions|club)/i.test(u),
+      ),
+    ];
 
-    const items = payload.items ?? [];
-    return items.map((item) => {
-      const rawStatus = item.status ?? 'UNKNOWN';
-      return {
-        externalCourseId: String(item.courseId ?? item.productId ?? ''),
-        courseTitle: item.title ?? item.name ?? 'Curso Hotmart',
-        purchaseRef: item.purchaseRef ?? item.transaction ?? 'HM-REF',
-        rawStatus,
-        normalizedStatus: normalizeTransactionStatus(rawStatus),
-        coverUrl: item.coverUrl,
+    let lastStatus = 0;
+    let lastUrl = candidateUrls[0];
+
+    for (const url of candidateUrls) {
+      lastUrl = url;
+      const res = await this.fetchFn(url, {
+        method: 'GET',
+        headers: buildAuthHeaders(session),
+      });
+      lastStatus = res.status;
+      if (!res.ok) {
+        if (res.status === 404 && candidateUrls.length > 1) {
+          continue;
+        }
+        throw new Error(`Hotmart purchases lookup failed (${res.status}) at ${url}`);
+      }
+
+      const payload = (await res.json()) as {
+        items?: Array<Record<string, unknown>>;
+        data?: Array<Record<string, unknown>>;
+        content?: Array<Record<string, unknown>>;
       };
-    });
+
+      const items = payload.items ?? payload.data ?? payload.content ?? [];
+      if (items.length === 0 && candidateUrls.length > 1 && url !== candidateUrls[candidateUrls.length - 1]) {
+        continue;
+      }
+
+      return items.map((item) => {
+        const product = (item.product as Record<string, unknown> | undefined) ?? {};
+        const purchase = (item.purchase as Record<string, unknown> | undefined) ?? {};
+        const rawStatus = String(item.status ?? purchase.status ?? 'ACTIVE');
+        return {
+          externalCourseId: String(
+            item.courseId ?? item.productId ?? product.id ?? item.id ?? '',
+          ),
+          courseTitle: String(
+            item.title ?? item.name ?? product.name ?? 'Curso Hotmart',
+          ),
+          purchaseRef: String(
+            item.purchaseRef ?? item.transaction ?? purchase.transaction ?? 'HM-REF',
+          ),
+          rawStatus,
+          normalizedStatus: normalizeTransactionStatus(rawStatus),
+          coverUrl:
+            typeof (item.coverUrl ?? product.coverImage) === 'string'
+              ? String(item.coverUrl ?? product.coverImage)
+              : undefined,
+        };
+      });
+    }
+
+    throw new Error(`Hotmart /my-courses failed with HTTP ${lastStatus} (${lastUrl})`);
   }
 
   async verifyCourseOwnership(

@@ -6,6 +6,7 @@ export interface DecryptedSession {
   email: string;
   bearerToken?: string;
   cookies: Array<{ name: string; value: string; domain: string }>;
+  discoveredApiUrls?: string[];
   expiresAt?: string;
 }
 

@@ -5,6 +5,7 @@ import { DecryptedSession, WebBridgeConfig } from '../adapters/platformAdapter';
 export interface WebBridgeResult {
   bearerToken?: string;
   cookies: Array<{ name: string; value: string; domain: string }>;
+  discoveredApiUrls?: string[];
   email?: string;
   externalUserId?: string;
 }
@@ -31,9 +32,40 @@ export async function openIsolatedWebBridgeLogin(
 
   return new Promise<WebBridgeResult>((resolve, reject) => {
     let settled = false;
+    let capturedBearerFromHeader: string | undefined;
+    const discoveredApiUrls = new Set<string>();
+    const trackedWindows = new Set<BrowserWindow>();
+
+    const onBeforeSendHeaders = (
+      details: Electron.OnBeforeSendHeadersListenerDetails,
+      callback: (beforeSendResponse: Electron.BeforeSendResponse) => void,
+    ) => {
+      const authHeader =
+        details.requestHeaders.Authorization ?? details.requestHeaders.authorization;
+      if (typeof authHeader === 'string' && /^Bearer\s+/i.test(authHeader)) {
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (token.length > 20) {
+          capturedBearerFromHeader = token;
+        }
+      }
+      if (
+        (details.resourceType === 'xhr' || details.resourceType === 'other') &&
+        /(purchase|course|club|product|member|subscription|order|my-courses)/i.test(details.url) &&
+        discoveredApiUrls.size < 30
+      ) {
+        discoveredApiUrls.add(details.url);
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    };
+
+    webSession.webRequest.onBeforeSendHeaders(
+      { urls: ['https://*/*'] },
+      onBeforeSendHeaders,
+    );
+
     const win = new BrowserWindow({
-      width: 520,
-      height: 740,
+      width: 620,
+      height: 780,
       title: `Conectar ${config.platform.toUpperCase()} — Antigravity WebBridge`,
       parent: parentWindow ?? undefined,
       modal: Boolean(parentWindow),
@@ -45,13 +77,37 @@ export async function openIsolatedWebBridgeLogin(
         sandbox: true,
       },
     });
+    trackedWindows.add(win);
 
-    const tryCaptureSession = async (currentUrl: string) => {
+    let capturePending = false;
+
+    const cleanupAndResolve = (result: WebBridgeResult) => {
       if (settled) return;
+      settled = true;
+      clearInterval(pollTimer);
+      webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, null);
+      for (const w of trackedWindows) {
+        if (!w.isDestroyed()) {
+          w.close();
+        }
+      }
+      resolve(result);
+    };
+
+    const tryCaptureSession = async (targetWin: BrowserWindow, currentUrl: string) => {
+      if (settled || capturePending || targetWin.isDestroyed()) return;
+      if (/sso\.hotmart\.com\/login/i.test(currentUrl)) return;
       const matched = config.successUrlPatterns.some((re) => re.test(currentUrl));
       if (!matched) return;
 
+      capturePending = true;
       try {
+        // Wait briefly for SPA XHR requests to emit Authorization headers
+        if (!capturedBearerFromHeader) {
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+        if (settled || targetWin.isDestroyed()) return;
+
         const allCookies = await webSession.cookies.get({});
         const relevantCookies = allCookies
           .filter((c) =>
@@ -63,51 +119,110 @@ export async function openIsolatedWebBridgeLogin(
             domain: c.domain ?? '',
           }));
 
-        let bearerToken: string | undefined;
+        let bearerToken: string | undefined = capturedBearerFromHeader;
         let email: string | undefined;
         let externalUserId: string | undefined;
 
-        try {
-          const storageProbe = (await win.webContents.executeJavaScript(
-            `(() => {
-              const keys = ${JSON.stringify(config.bearerStorageKeys)};
-              let token = null;
-              for (const k of keys) {
-                token = window.localStorage.getItem(k) || window.sessionStorage.getItem(k);
-                if (token) break;
-              }
-              return { token };
-            })()`,
-            true,
-          )) as { token?: string | null };
+        if (!bearerToken) {
+          try {
+            const storageProbe = (await targetWin.webContents.executeJavaScript(
+              `(() => {
+                const keys = ${JSON.stringify(config.bearerStorageKeys)};
+                let token = null;
+                for (const k of keys) {
+                  token = window.localStorage.getItem(k) || window.sessionStorage.getItem(k);
+                  if (token) break;
+                }
+                if (!token) {
+                  for (const store of [window.localStorage, window.sessionStorage]) {
+                    for (let i = 0; i < store.length; i++) {
+                      const val = store.getItem(store.key(i) || '') || '';
+                      if (/^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\./.test(val)) {
+                        token = val;
+                        break;
+                      }
+                      try {
+                        const obj = JSON.parse(val);
+                        if (obj && typeof obj.access_token === 'string') {
+                          token = obj.access_token;
+                          break;
+                        }
+                        if (obj && typeof obj.token === 'string') {
+                          token = obj.token;
+                          break;
+                        }
+                      } catch {}
+                    }
+                    if (token) break;
+                  }
+                }
+                return { token };
+              })()`,
+              true,
+            )) as { token?: string | null };
 
-          if (storageProbe?.token) {
-            bearerToken = storageProbe.token.replace(/^Bearer\s+/i, '');
+            if (storageProbe?.token) {
+              bearerToken = storageProbe.token.replace(/^Bearer\s+/i, '');
+            }
+          } catch {
+            // Storage probe is best-effort; HttpOnly session cookies remain authoritative.
           }
-        } catch {
-          // Storage probe is best-effort; HttpOnly session cookies remain authoritative.
         }
 
         if (relevantCookies.length === 0 && !bearerToken) {
           return;
         }
 
-        settled = true;
-        win.close();
-        resolve({
+        console.log(
+          `[WebBridge] Sessão capturada em ${currentUrl} (cookies=${relevantCookies.length}, bearer=${Boolean(bearerToken)}, apis=${discoveredApiUrls.size})`,
+        );
+
+        cleanupAndResolve({
           bearerToken,
           cookies: relevantCookies,
+          discoveredApiUrls: [...discoveredApiUrls],
           email,
           externalUserId,
         });
       } catch (err) {
         if (!settled) {
           settled = true;
-          win.close();
+          clearInterval(pollTimer);
+          webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, null);
+          for (const w of trackedWindows) {
+            if (!w.isDestroyed()) w.close();
+          }
           reject(err);
         }
+      } finally {
+        capturePending = false;
       }
     };
+
+    const attachMonitors = (targetWin: BrowserWindow) => {
+      targetWin.webContents.on('did-navigate', (_event, url) => {
+        void tryCaptureSession(targetWin, url);
+      });
+      targetWin.webContents.on('did-navigate-in-page', (_event, url) => {
+        void tryCaptureSession(targetWin, url);
+      });
+      targetWin.webContents.on('did-finish-load', () => {
+        void tryCaptureSession(targetWin, targetWin.webContents.getURL());
+      });
+      targetWin.webContents.on('did-create-window', (childWin) => {
+        trackedWindows.add(childWin);
+        attachMonitors(childWin);
+      });
+    };
+
+    const pollTimer = setInterval(() => {
+      if (settled) return;
+      for (const w of trackedWindows) {
+        if (!w.isDestroyed()) {
+          void tryCaptureSession(w, w.webContents.getURL());
+        }
+      }
+    }, 1500);
 
     win.once('ready-to-show', () => {
       win.show();
@@ -148,16 +263,13 @@ export async function openIsolatedWebBridgeLogin(
       };
     });
 
-    win.webContents.on('did-navigate', (_event, url) => {
-      void tryCaptureSession(url);
-    });
-    win.webContents.on('did-navigate-in-page', (_event, url) => {
-      void tryCaptureSession(url);
-    });
+    attachMonitors(win);
 
     win.on('closed', () => {
       if (!settled) {
         settled = true;
+        clearInterval(pollTimer);
+        webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, null);
         reject(new Error('Janela de autenticação WebBridge fechada antes da conclusão do login.'));
       }
     });
@@ -176,6 +288,7 @@ export function buildSessionRecord(
     email: captured.email ?? `${config.platform}-member`,
     bearerToken: captured.bearerToken,
     cookies: captured.cookies,
+    discoveredApiUrls: captured.discoveredApiUrls,
   };
 }
 
