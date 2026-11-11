@@ -47,6 +47,9 @@ export const App: React.FC = () => {
     setOfflineCourses(off);
     setJobs(jbs);
     setSettings(cfg);
+    if (off.length === 0 && accs.filter((a) => a.status === 'CONNECTED').length === 0) {
+      setTab('accounts');
+    }
   }, []);
 
   const syncAllConnectedCourses = useCallback(async () => {

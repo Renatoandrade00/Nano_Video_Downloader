@@ -1,4 +1,5 @@
 import { BrowserWindow, session } from 'electron';
+import { isAllowedWebUrl } from '../../shared/urlGuard';
 import { DecryptedSession, WebBridgeConfig } from '../adapters/platformAdapter';
 
 export interface WebBridgeResult {
@@ -19,6 +20,14 @@ export async function openIsolatedWebBridgeLogin(
 ): Promise<WebBridgeResult> {
   const partitionName = `persist:webbridge-${config.platform}-${partitionId}`;
   const webSession = session.fromPartition(partitionName);
+
+  // Swallow custom schemes like `sslocal://` silently so Windows never opens
+  // the "Você precisa de um novo app para abrir este link" dialog.
+  for (const scheme of ['sslocal', 'intent', 'hotmart', 'kiwify']) {
+    if (!webSession.protocol.isProtocolHandled(scheme)) {
+      webSession.protocol.handle(scheme, () => new Response('', { status: 204 }));
+    }
+  }
 
   return new Promise<WebBridgeResult>((resolve, reject) => {
     let settled = false;
@@ -99,6 +108,45 @@ export async function openIsolatedWebBridgeLogin(
         }
       }
     };
+
+    win.once('ready-to-show', () => {
+      win.show();
+      win.focus();
+    });
+
+    // Block external non-HTTP(S) protocols (e.g. sslocal://, intent://) on all frames and popups
+    win.webContents.on('will-navigate', (event, url) => {
+      if (!isAllowedWebUrl(url)) {
+        event.preventDefault();
+      }
+    });
+    win.webContents.on('will-frame-navigate', (details) => {
+      if (!isAllowedWebUrl(details.url)) {
+        details.preventDefault();
+      }
+    });
+    win.webContents.on('will-redirect', (event, url) => {
+      if (!isAllowedWebUrl(url)) {
+        event.preventDefault();
+      }
+    });
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (!isAllowedWebUrl(url)) {
+        return { action: 'deny' };
+      }
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          webPreferences: {
+            partition: partitionName,
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
+          },
+        },
+      };
+    });
 
     win.webContents.on('did-navigate', (_event, url) => {
       void tryCaptureSession(url);

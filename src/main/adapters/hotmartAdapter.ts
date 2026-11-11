@@ -33,6 +33,8 @@ export class HotmartAdapter implements IPlatformAdapter {
         /consumer\.hotmart\.com/i,
         /club\.hotmart\.com/i,
         /app\.hotmart\.com/i,
+        /hub\.hotmart\.com/i,
+        /my\.hotmart\.com/i,
       ],
       cookieDomains: ['hotmart.com', '.hotmart.com'],
       bearerStorageKeys: ['hmAccessToken', 'access_token', 'token'],

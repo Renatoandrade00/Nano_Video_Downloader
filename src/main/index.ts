@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { AppSettings } from '../shared/types';
 import { AdapterRegistry } from './adapters/registry';
+import { isAllowedWebUrl } from '../shared/urlGuard';
 import { AuthManager } from './auth/authManager';
 import { CatalogCrawler } from './catalog/catalogCrawler';
 import { registerIpcHandlers } from './ipc/handlers';
@@ -114,6 +115,12 @@ function createWindow(): void {
 
   if (isHeadlessE2E) {
     enableOfflineE2ECheck(mainWindow);
+  } else {
+    mainWindow.once('ready-to-show', () => {
+      mainWindow?.show();
+      mainWindow?.focus();
+      app.focus({ steal: true });
+    });
   }
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -127,6 +134,24 @@ function createWindow(): void {
     mainWindow = null;
   });
 }
+
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-navigate', (event, url) => {
+    if (!isAllowedWebUrl(url)) {
+      event.preventDefault();
+    }
+  });
+  contents.on('will-frame-navigate', (details) => {
+    if (!isAllowedWebUrl(details.url)) {
+      details.preventDefault();
+    }
+  });
+  contents.on('will-redirect', (event, url) => {
+    if (!isAllowedWebUrl(url)) {
+      event.preventDefault();
+    }
+  });
+});
 
 app.whenReady().then(() => {
   const userDataDir = app.getPath('userData');

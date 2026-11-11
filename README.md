@@ -47,7 +47,7 @@ pnpm run typecheck
 # Compilar build de produção (dist/main e dist/renderer)
 pnpm run build
 
-# Executar aplicação desktop Electron
+# Executar aplicação desktop Electron (ou use "Abrir Nano Video Downloader.bat" no Windows)
 pnpm start
 
 # Executar suíte completa de testes automatizados (unitários, integração, benchmark e E2E offline)
@@ -67,3 +67,4 @@ pnpm test
 ├── tests/                 # Suíte Vitest (unitários, queda no seg. 145/300, benchmark 15m 1080p e E2E Electron)
 └── package.json
 ```
+

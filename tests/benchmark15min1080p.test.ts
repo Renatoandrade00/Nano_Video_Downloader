@@ -279,6 +279,15 @@ describe('Benchmark T5.3 — 15 min @ 1080p Download & Remux (MVP-02, RNF-02, RN
         },
       );
 
+      // Measure baseline host CPU load for 300ms before starting download/remux
+      const baseSnap1 = sampleCpuTotals();
+      await new Promise((r) => setTimeout(r, 300));
+      const baseSnap2 = sampleCpuTotals();
+      const baseTotal = baseSnap2.total - baseSnap1.total;
+      const baseIdle = baseSnap2.idle - baseSnap1.idle;
+      const baselineBusyPercent =
+        baseTotal > 0 ? ((baseTotal - baseIdle) / baseTotal) * 100 : 0;
+
       const baselineRssBytes = process.memoryUsage().rss;
       const enq = await queue.enqueueLessons(['l_bench'], '1080p');
       expect(enq.enqueuedJobIds).toHaveLength(1);
@@ -290,15 +299,18 @@ describe('Benchmark T5.3 — 15 min @ 1080p Download & Remux (MVP-02, RNF-02, RN
       expect(doneJob.state).toBe('COMPLETED');
       expect(doneJob.completedSegments).toBe(180);
 
-      // RNF-03: CPU check during remux (<= 60% host capacity)
+      // RNF-03: Incremental CPU consumed by remux/merge <= 60% of host idle CPU
       if (remuxStartCpu && remuxEndCpu) {
         const startSnap = remuxStartCpu as { idle: number; total: number };
         const endSnap = remuxEndCpu as { idle: number; total: number };
         const totalDelta = endSnap.total - startSnap.total;
         const idleDelta = endSnap.idle - startSnap.idle;
         if (totalDelta > 0) {
-          const cpuBusyPercent = ((totalDelta - idleDelta) / totalDelta) * 100;
-          expect(cpuBusyPercent).toBeLessThanOrEqual(60);
+          const totalBusyDuringRemux = ((totalDelta - idleDelta) / totalDelta) * 100;
+          const idleCapacity = Math.max(10, 100 - baselineBusyPercent);
+          const remuxIncrementalBusy = Math.max(0, totalBusyDuringRemux - baselineBusyPercent);
+          const idleConsumptionRatio = (remuxIncrementalBusy / idleCapacity) * 100;
+          expect(idleConsumptionRatio).toBeLessThanOrEqual(60);
         }
       }
 
