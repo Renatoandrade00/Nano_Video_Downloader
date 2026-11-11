@@ -1,0 +1,32 @@
+{
+  "name": "nano-video-downloader",
+  "version": "1.0.0",
+  "description": "Nano Video Downloader — Aplicação desktop offline-first baseada na arquitetura Google Antigravity para cursos adquiridos legitimamente.",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "vite",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "start": "pnpm run build && electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.0.8",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "electron": "^36.2.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.3"
+  }
+}

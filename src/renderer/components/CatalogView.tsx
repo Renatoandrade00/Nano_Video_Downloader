@@ -1,0 +1,276 @@
+import React, { useState } from 'react';
+import { CheckSquare, Download, Lock, RefreshCw, Square } from 'lucide-react';
+import {
+  CourseRecord,
+  CourseTreeDetails,
+  ResolutionOption,
+} from '../../shared/types';
+
+interface CatalogViewProps {
+  courses: CourseRecord[];
+  online: boolean;
+  onEnqueued: () => void;
+}
+
+const RESOLUTIONS: ResolutionOption[] = ['1080p', '720p', '480p', '360p'];
+
+export const CatalogView: React.FC<CatalogViewProps> = ({
+  courses,
+  online,
+  onEnqueued,
+}) => {
+  const [selectedCourse, setSelectedCourse] = useState<CourseTreeDetails | null>(null);
+  const [selectedLessonIds, setSelectedLessonIds] = useState<Set<string>>(new Set());
+  const [resolution, setResolution] = useState<ResolutionOption>('1080p');
+  const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  const openCourse = async (course: CourseRecord, forceRemote = false) => {
+    setLoadingCourseId(course.id);
+    setStatusMsg(null);
+    try {
+      const details = await window.antigravity.catalog.getCourseDetails(course.id, forceRemote);
+      setSelectedCourse(details);
+      setSelectedLessonIds(new Set());
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Erro ao carregar módulos do curso.');
+    } finally {
+      setLoadingCourseId(null);
+    }
+  };
+
+  const toggleLesson = (lessonId: string) => {
+    setSelectedLessonIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(lessonId)) next.delete(lessonId);
+      else next.add(lessonId);
+      return next;
+    });
+  };
+
+  const toggleModule = (lessonIds: string[]) => {
+    setSelectedLessonIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = lessonIds.every((id) => next.has(id));
+      for (const id of lessonIds) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const enqueueIds = async (lessonIds: string[]) => {
+    if (lessonIds.length === 0) return;
+    setStatusMsg(null);
+    const res = await window.antigravity.queue.enqueue(lessonIds, resolution);
+    if (res.enqueuedJobIds.length > 0) {
+      setStatusMsg(
+        `${res.enqueuedJobIds.length} aula(s) enfileirada(s) em ${resolution}.${res.rejected.length > 0 ? ` (${res.rejected.length} rejeitada(s))` : ''}`,
+      );
+      setSelectedLessonIds(new Set());
+      onEnqueued();
+    } else if (res.rejected.length > 0) {
+      setStatusMsg(`Nenhuma aula enfileirada: ${res.rejected[0].reason}`);
+    }
+  };
+
+  const allAvailableLessonIds =
+    selectedCourse?.modules.flatMap((m) =>
+      m.lessons
+        .filter((l) => l.hasVideo && l.availabilityStatus === 'AVAILABLE')
+        .map((l) => l.id),
+    ) ?? [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Catálogo de Cursos</h1>
+          <p className="page-desc">
+            Apenas cursos com titularidade ativa (COMPLETED / ACTIVE) são liberados para download.
+          </p>
+        </div>
+
+        <div className="row-gap">
+          <label style={{ fontSize: 13, color: 'var(--muted)' }}>Resolução:</label>
+          <select
+            className="select-input"
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value as ResolutionOption)}
+          >
+            {RESOLUTIONS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {statusMsg && (
+        <div className="card" style={{ borderColor: 'rgba(99,102,241,0.45)' }}>
+          {statusMsg}
+        </div>
+      )}
+
+      {courses.length === 0 ? (
+        <div className="card">
+          <p style={{ margin: 0, color: 'var(--muted)' }}>
+            Nenhum curso sincronizado ainda. Conecte uma conta na aba Contas e clique em
+            Sincronizar.
+          </p>
+        </div>
+      ) : (
+        <div className="grid-2">
+          {courses.map((course) => (
+            <div key={course.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="row-between">
+                <strong style={{ fontSize: 15 }}>{course.title}</strong>
+                <span
+                  className={`badge ${
+                    course.licenseStatus === 'AUTHORIZED' ? 'badge-success' : 'badge-danger'
+                  }`}
+                >
+                  {course.licenseStatus}
+                </span>
+              </div>
+              <div className="row-between">
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Verificado em {new Date(course.licenseCheckedAt).toLocaleString('pt-BR')}
+                </span>
+                <div className="row-gap">
+                  <button
+                    className="btn"
+                    disabled={course.licenseStatus !== 'AUTHORIZED' || loadingCourseId === course.id}
+                    onClick={() => void openCourse(course, false)}
+                  >
+                    {loadingCourseId === course.id ? 'Carregando...' : 'Abrir Módulos'}
+                  </button>
+                  {online && (
+                    <button
+                      className="btn"
+                      title="Atualizar árvore remota"
+                      disabled={course.licenseStatus !== 'AUTHORIZED' || loadingCourseId === course.id}
+                      onClick={() => void openCourse(course, true)}
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedCourse && (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="row-between">
+            <div>
+              <strong style={{ fontSize: 16 }}>{selectedCourse.course.title}</strong>
+              <p className="page-desc">
+                Selecione aulas ou módulos inteiros para enfileirar em lote.
+              </p>
+            </div>
+            <div className="row-gap">
+              <button
+                className="btn"
+                disabled={!online || allAvailableLessonIds.length === 0}
+                onClick={() => void enqueueIds(allAvailableLessonIds)}
+              >
+                <Download size={14} />
+                Baixar Curso Completo ({allAvailableLessonIds.length})
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={!online || selectedLessonIds.size === 0}
+                onClick={() => void enqueueIds([...selectedLessonIds])}
+              >
+                <Download size={14} />
+                Enfileirar Selecionadas ({selectedLessonIds.size})
+              </button>
+            </div>
+          </div>
+
+          {selectedCourse.modules.map((mod) => {
+            const selectableIds = mod.lessons
+              .filter((l) => l.hasVideo && l.availabilityStatus === 'AVAILABLE')
+              .map((l) => l.id);
+            const allModSelected =
+              selectableIds.length > 0 && selectableIds.every((id) => selectedLessonIds.has(id));
+
+            return (
+              <div
+                key={mod.id}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: 12,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div className="row-between">
+                  <div className="row-gap">
+                    <button
+                      className="btn"
+                      style={{ padding: '4px 8px' }}
+                      disabled={selectableIds.length === 0}
+                      onClick={() => toggleModule(selectableIds)}
+                    >
+                      {allModSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                      Módulo {String(mod.orderIndex).padStart(2, '0')} — {mod.title}
+                    </button>
+                  </div>
+                  <button
+                    className="btn"
+                    style={{ padding: '4px 10px', fontSize: 12 }}
+                    disabled={!online || selectableIds.length === 0}
+                    onClick={() => void enqueueIds(selectableIds)}
+                  >
+                    <Download size={13} />
+                    Baixar Módulo
+                  </button>
+                </div>
+
+                {mod.lessons.map((lesson) => {
+                  const canSelect = lesson.hasVideo && lesson.availabilityStatus === 'AVAILABLE';
+                  const checked = selectedLessonIds.has(lesson.id);
+                  return (
+                    <div key={lesson.id} className="lesson-row">
+                      <div className="row-gap">
+                        <input
+                          type="checkbox"
+                          disabled={!canSelect}
+                          checked={checked}
+                          onChange={() => toggleLesson(lesson.id)}
+                        />
+                        <span style={{ fontSize: 13 }}>
+                          Aula {String(lesson.orderIndex).padStart(2, '0')} — {lesson.title}
+                        </span>
+                      </div>
+                      <div className="row-gap">
+                        {lesson.localFilePath && (
+                          <span className="badge badge-success">Baixada</span>
+                        )}
+                        {!canSelect && (
+                          <span className="badge badge-warning">
+                            <Lock size={11} style={{ marginRight: 4 }} />
+                            {lesson.availabilityStatus}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
