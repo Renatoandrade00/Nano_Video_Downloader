@@ -42,7 +42,8 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
     try {
       await window.antigravity.auth.connect(platform);
       await onRefreshAccounts();
-      setFeedback(`Conta ${platform.toUpperCase()} conectada e protegida com AES-256.`);
+      await onSyncedCourses();
+      setFeedback(`Conta ${platform.toUpperCase()} conectada, sincronizada e protegida com AES-256.`);
     } catch (err) {
       setFeedback(err instanceof Error ? err.message : 'Falha ao conectar conta.');
     } finally {
@@ -53,6 +54,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   const handleDisconnect = async (accountId: string) => {
     await window.antigravity.auth.disconnect(accountId);
     await onRefreshAccounts();
+    await onSyncedCourses();
     setFeedback('Sessão desconectada e tokens removidos do cofre do sistema.');
   };
 
