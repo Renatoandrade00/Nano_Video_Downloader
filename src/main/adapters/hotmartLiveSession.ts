@@ -16,6 +16,18 @@ function getElectron() {
   return require('electron') as typeof import('electron');
 }
 
+async function safeLoadUrl(win: Electron.BrowserWindow, url: string): Promise<void> {
+  try {
+    await win.loadURL(url);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // OIDC / SPA redirects in Hotmart trigger ERR_ABORTED (-3) before landing on the target page
+    if (!msg.includes('ERR_ABORTED') && !msg.includes('(-3)')) {
+      throw err;
+    }
+  }
+}
+
 function createHiddenSessionWindow(partitionName: string) {
   const { BrowserWindow, session } = getElectron();
   const webSession = session.fromPartition(partitionName);
@@ -330,7 +342,7 @@ export async function fetchLiveHotmartPurchases(
   const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
 
   try {
-    await win.loadURL('https://consumer.hotmart.com');
+    await safeLoadUrl(win, 'https://consumer.hotmart.com');
 
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
@@ -408,7 +420,10 @@ function findModuleArray(root: unknown): Array<Record<string, unknown>> | null {
       if (
         Array.isArray(first.pages) ||
         Array.isArray(first.lessons) ||
-        Array.isArray(first.contents)
+        Array.isArray(first.contents) ||
+        Array.isArray(first.children) ||
+        Array.isArray(first.items) ||
+        Array.isArray(first.topics)
       ) {
         return cur as Array<Record<string, unknown>>;
       }
@@ -438,10 +453,13 @@ function extractClubTreeFromJson(
 
     const modulesArray =
       Array.isArray(directModules) &&
-        directModules.length > 0 &&
-        (Array.isArray(directModules[0]?.pages) ||
-          Array.isArray(directModules[0]?.lessons) ||
-          Array.isArray(directModules[0]?.contents))
+      directModules.length > 0 &&
+      (Array.isArray(directModules[0]?.pages) ||
+        Array.isArray(directModules[0]?.lessons) ||
+        Array.isArray(directModules[0]?.contents) ||
+        Array.isArray(directModules[0]?.children) ||
+        Array.isArray(directModules[0]?.items) ||
+        Array.isArray(directModules[0]?.topics))
         ? directModules
         : findModuleArray(body);
 
@@ -456,9 +474,13 @@ function extractClubTreeFromJson(
     })();
 
     const modules: RemoteModuleNode[] = modulesArray.map((mod, mIdx) => {
-      const pages = (mod.pages ?? mod.lessons ?? mod.contents ?? []) as Array<
-        Record<string, unknown>
-      >;
+      const pages = (mod.pages ??
+        mod.lessons ??
+        mod.contents ??
+        mod.children ??
+        mod.items ??
+        mod.topics ??
+        []) as Array<Record<string, unknown>>;
       const lessons: RemoteLessonNode[] = pages.map((p, lIdx) => {
         const pageId = String(p.hash ?? p.id ?? p.pageId ?? `${mIdx}_${lIdx}`);
         const lessonUrl =
@@ -527,7 +549,7 @@ async function resolveNumericCourseUrl(
   win.webContents.on('did-navigate-in-page', (_e, url) => acceptCandidateUrl(url));
 
   try {
-    await win.loadURL('https://consumer.hotmart.com');
+    await safeLoadUrl(win, 'https://consumer.hotmart.com');
     const deadline = Date.now() + 14000;
     while (Date.now() < deadline) {
       if (resolvedUrl) {
@@ -630,9 +652,11 @@ export async function fetchLiveHotmartCatalog(
   const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
 
   try {
-    await win.loadURL(clubUrl);
+    await safeLoadUrl(win, clubUrl);
 
-    const deadline = Date.now() + 12000;
+    let clickedStart = false;
+    const startMs = Date.now();
+    const deadline = startMs + 16000;
     while (Date.now() < deadline) {
       const currentUrl = win.webContents.getURL();
       if (/sso\.hotmart\.com\/login/i.test(currentUrl)) {
@@ -648,10 +672,22 @@ export async function fetchLiveHotmartCatalog(
         return jsonTree;
       }
 
+      if (!clickedStart && Date.now() - startMs > 2500) {
+        clickedStart = (await win.webContents.executeJavaScript(
+          `(() => {
+            const btns = Array.from(document.querySelectorAll('a, button'));
+            const target = btns.find(el => /continuar assistindo|começar|iniciar curso|acessar conteúdo|ver aulas|assistir/i.test((el.textContent || '').trim()));
+            if (target) { target.click(); return true; }
+            return false;
+          })()`,
+          true,
+        )) as boolean;
+      }
+
       const domTree = (await win.webContents.executeJavaScript(
         `(() => {
           const title = document.title || 'Curso Hotmart';
-          const links = Array.from(document.querySelectorAll('a[href*="/lesson/"], a[href*="/content/"], a[href*="/page/"]'));
+          const links = Array.from(document.querySelectorAll('a[href*="/lesson/"], a[href*="/content/"], a[href*="/page/"], a[href*="/products/"][href*="/content"]'));
           if (!links.length) return null;
           const lessons = links.map((a, idx) => ({
             url: a.href,
@@ -693,6 +729,23 @@ export async function fetchLiveHotmartCatalog(
 
       await new Promise((r) => setTimeout(r, 600));
     }
+
+    writeSyncDebugLog({
+      event: 'fetchLiveHotmartCatalogFailed',
+      courseExternalId,
+      clubUrl,
+      finalUrl: win.webContents.getURL(),
+      clickedStart,
+      apiResponses: interceptor.responses.map((r) => ({
+        url: r.url,
+        keys:
+          r.body && typeof r.body === 'object' && !Array.isArray(r.body)
+            ? Object.keys(r.body as Record<string, unknown>).slice(0, 12)
+            : Array.isArray(r.body)
+              ? `array(${r.body.length})`
+              : typeof r.body,
+      })),
+    });
 
     throw new Error(`Não foi possível mapear os módulos em ${clubUrl}.`);
   } finally {
@@ -742,7 +795,7 @@ export async function resolveLiveHotmartLessonMedia(
   webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, onBeforeSendHeaders);
 
   try {
-    await win.loadURL(lessonExternalId);
+    await safeLoadUrl(win, lessonExternalId);
 
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
