@@ -130,3 +130,6 @@ flowchart LR
 - [x] **T5.4 — Teste E2E em Modo Avião (`MVP-03`)**
   - Verificação automatizada em Electron com rede HTTP/HTTPS bloqueada, carregamento da biblioteca offline via SQLite, streaming local `antigravity-media://` (`206` Byte-Range + `<video>`) e persistência de progresso `"Assistida"`. *(Validação manual adicional com placa de rede física desligada e conta real Hotmart/Kiwify recomendada antes da release.)*
   - **Ref:** `RF-12`, `RF-13`, PRD Seção 7 (`MVP-03`).
+- [x] **T5.5 — Empacotamento do Instalador Windows Standalone (NSIS + FFmpeg)**
+  - Configuração do `electron-builder` (`pnpm run dist`) com geração de instalador executável `Nano Video Downloader Setup 1.0.0.exe` (NSIS x64), inclusão do `ffmpeg.exe` embutido em `extraResources`, resolução automática de binário para máquinas sem dependências pré-instaladas e atalhos na Área de Trabalho e Menu Iniciar.
+  - **Ref:** RNF-01, RNF-02, Release 1.0.0.
