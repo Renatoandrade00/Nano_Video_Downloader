@@ -132,4 +132,5 @@ flowchart LR
   - **Ref:** `RF-12`, `RF-13`, PRD Seção 7 (`MVP-03`).
 - [x] **T5.5 — Empacotamento do Instalador Windows Standalone (NSIS + FFmpeg)**
   - Configuração do `electron-builder` (`pnpm run dist`) com geração de instalador executável `Nano Video Downloader Setup 1.0.0.exe` (NSIS x64), inclusão do `ffmpeg.exe` embutido em `extraResources`, resolução automática de binário para máquinas sem dependências pré-instaladas e atalhos na Área de Trabalho e Menu Iniciar.
+  - Publicação da pasta `release/` no GitHub via **Git LFS** (`*.exe`), com documentação completa dos métodos de instalação e termo legal de responsabilidade/direitos autorais no `README.md`.
   - **Ref:** RNF-01, RNF-02, Release 1.0.0.
