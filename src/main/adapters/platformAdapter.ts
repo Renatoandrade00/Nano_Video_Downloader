@@ -95,9 +95,24 @@ export interface IPlatformAdapter {
   ): Promise<MediaDescriptor>;
 }
 
+const AUTHORIZED_STATUSES = new Set([
+  'COMPLETED',
+  'COMPLETE',
+  'ACTIVE',
+  'APPROVED',
+  'PAID',
+  'AUTHORIZED',
+  'AVAILABLE',
+  'ENABLED',
+  'GRANTED',
+  'PUBLISHED',
+  'FREE',
+  'SUBSCRIBER',
+]);
+
 export function normalizeTransactionStatus(rawStatus: RawTransactionStatus): LicenseStatus {
   const upper = rawStatus.trim().toUpperCase();
-  if (upper === 'COMPLETED' || upper === 'ACTIVE' || upper === 'APPROVED') {
+  if (AUTHORIZED_STATUSES.has(upper)) {
     return 'AUTHORIZED';
   }
   return 'REVOKED';

@@ -129,6 +129,48 @@ function attachJsonInterceptor(
   };
 }
 
+function extractStatusString(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    return raw.trim();
+  }
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const nested = obj.value ?? obj.code ?? obj.status ?? obj.name ?? obj.label;
+    if (typeof nested === 'string' && nested.trim().length > 0) {
+      return nested.trim();
+    }
+  }
+  return 'ACTIVE';
+}
+
+function extractClubUrlFromNode(obj: Record<string, unknown>): string | undefined {
+  const product = (obj.product as Record<string, unknown> | undefined) ?? undefined;
+  const membership = (obj.membership as Record<string, unknown> | undefined) ?? undefined;
+  const club = (obj.club as Record<string, unknown> | undefined) ?? undefined;
+  const candidates = [
+    obj.clubUrl,
+    obj.accessUrl,
+    obj.membershipUrl,
+    obj.redirectUrl,
+    obj.url,
+    product?.clubUrl,
+    product?.accessUrl,
+    product?.url,
+    membership?.url,
+    club?.url,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && /^https?:\/\//i.test(c)) {
+      return c;
+    }
+  }
+  const subdomain = obj.subdomain ?? club?.subdomain ?? product?.subdomain;
+  if (typeof subdomain === 'string' && subdomain.trim().length > 0) {
+    return `https://${subdomain.trim()}.club.hotmart.com`;
+  }
+  return undefined;
+}
+
 function extractPurchasesFromJson(responses: CapturedJsonResponse[]): PurchaseRecord[] {
   const found: PurchaseRecord[] = [];
   const seenIds = new Set<string>();
@@ -152,15 +194,7 @@ function extractPurchasesFromJson(responses: CapturedJsonResponse[]): PurchaseRe
       obj.name ??
       obj.title;
 
-    const clubCandidate =
-      obj.clubUrl ??
-      obj.accessUrl ??
-      obj.url ??
-      product?.clubUrl ??
-      membership?.url ??
-      (typeof obj.subdomain === 'string' && obj.subdomain.length > 0
-        ? `https://${obj.subdomain}.club.hotmart.com`
-        : undefined);
+    const clubCandidate = extractClubUrlFromNode(obj);
 
     const idCandidate =
       (typeof clubCandidate === 'string' && clubCandidate.includes('club.hotmart.com')
@@ -184,8 +218,13 @@ function extractPurchasesFromJson(responses: CapturedJsonResponse[]): PurchaseRe
       const extId = String(idCandidate);
       if (!seenIds.has(extId)) {
         seenIds.add(extId);
-        const rawStatus = String(
-          purchase?.status ?? obj.status ?? obj.purchaseStatus ?? 'ACTIVE',
+        const rawStatus = extractStatusString(
+          purchase?.status ??
+            purchase?.transactionStatus ??
+            obj.purchaseStatus ??
+            obj.transactionStatus ??
+            obj.accessStatus ??
+            obj.status,
         );
         const coverCandidate =
           product?.cover ?? product?.coverImage ?? obj.coverUrl ?? obj.image ?? obj.thumbnail;
@@ -354,13 +393,81 @@ function extractClubTreeFromJson(
   return null;
 }
 
+async function resolveNumericCourseUrl(
+  partitionName: string,
+  courseExternalId: string,
+): Promise<string> {
+  const { win } = createHiddenSessionWindow(partitionName);
+  const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
+  let resolvedPopupUrl: string | null = null;
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedWebUrl(url) && !resolvedPopupUrl) {
+      resolvedPopupUrl = url;
+    }
+    return { action: 'deny' };
+  });
+
+  try {
+    await win.loadURL('https://consumer.hotmart.com');
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      for (const r of interceptor.responses) {
+        const queue: unknown[] = [r.body];
+        while (queue.length > 0) {
+          const cur = queue.shift();
+          if (!cur || typeof cur !== 'object') continue;
+          if (Array.isArray(cur)) {
+            queue.push(...cur);
+            continue;
+          }
+          const obj = cur as Record<string, unknown>;
+          const product = (obj.product as Record<string, unknown> | undefined) ?? undefined;
+          const idMatch =
+            String(product?.id ?? obj.productId ?? obj.courseId ?? obj.ucode ?? '') ===
+            courseExternalId;
+          if (idMatch) {
+            const url = extractClubUrlFromNode(obj);
+            if (url) return url;
+          }
+          for (const v of Object.values(obj)) {
+            if (v && typeof v === 'object') queue.push(v);
+          }
+        }
+      }
+
+      const domHref = (await win.webContents.executeJavaScript(
+        `(() => {
+          const id = ${JSON.stringify(courseExternalId)};
+          const links = Array.from(document.querySelectorAll('a[href]'));
+          const exact = links.find(a => a.href.includes(id) || a.href.includes('club.hotmart.com') || a.href.includes('go.hotmart.com'));
+          return exact ? exact.href : null;
+        })()`,
+        true,
+      )) as string | null;
+
+      if (resolvedPopupUrl) return resolvedPopupUrl;
+      if (domHref && /^https?:\/\//i.test(domHref)) return domHref;
+
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } finally {
+    interceptor.detach();
+    if (!win.isDestroyed()) win.close();
+  }
+
+  return `https://consumer.hotmart.com`;
+}
+
 export async function fetchLiveHotmartCatalog(
   partitionName: string,
   courseExternalId: string,
 ): Promise<RemoteCourseTree> {
   const clubUrl = courseExternalId.startsWith('http')
     ? courseExternalId
-    : `https://${courseExternalId}.club.hotmart.com`;
+    : /^\d+$/.test(courseExternalId)
+      ? await resolveNumericCourseUrl(partitionName, courseExternalId)
+      : `https://${courseExternalId}.club.hotmart.com`;
 
   const { win } = createHiddenSessionWindow(partitionName);
   const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
