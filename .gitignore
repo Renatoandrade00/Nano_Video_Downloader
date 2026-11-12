@@ -1,6 +1,7 @@
 node_modules/
 dist/
-release/
+release/win-unpacked/
+release/builder-debug.yml
 bin/
 *.log
 .DS_Store
