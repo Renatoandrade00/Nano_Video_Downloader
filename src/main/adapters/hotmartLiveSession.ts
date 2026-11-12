@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { isAllowedWebUrl } from '../../shared/urlGuard';
 import {
   MediaDescriptor,
@@ -129,6 +131,20 @@ function attachJsonInterceptor(
   };
 }
 
+function writeSyncDebugLog(entry: Record<string, unknown>): void {
+  try {
+    const userData = getElectron().app.getPath('userData');
+    const logPath = path.join(userData, 'hotmart-sync-debug.log');
+    fs.appendFileSync(
+      logPath,
+      `${new Date().toISOString()} ${JSON.stringify(entry)}\n`,
+      'utf8',
+    );
+  } catch {
+    // Non-fatal diagnostic log
+  }
+}
+
 function extractStatusString(raw: unknown): string {
   if (typeof raw === 'string' && raw.trim().length > 0) {
     return raw.trim();
@@ -218,14 +234,67 @@ function extractPurchasesFromJson(responses: CapturedJsonResponse[]): PurchaseRe
       const extId = String(idCandidate);
       if (!seenIds.has(extId)) {
         seenIds.add(extId);
-        const rawStatus = extractStatusString(
+        const explicitlyBlocked =
+          obj.blocked === true ||
+          obj.isBlocked === true ||
+          obj.expired === true ||
+          obj.isExpired === true ||
+          obj.refunded === true ||
+          obj.canceled === true ||
+          obj.cancelled === true ||
+          obj.hasAccess === false ||
+          obj.accessible === false ||
+          purchase?.blocked === true ||
+          membership?.blocked === true;
+
+        const explicitAccessTrue =
+          obj.hasAccess === true ||
+          obj.accessible === true ||
+          obj.isBlocked === false ||
+          obj.blocked === false;
+
+        const rawCandidate =
           purchase?.status ??
-            purchase?.transactionStatus ??
-            obj.purchaseStatus ??
-            obj.transactionStatus ??
-            obj.accessStatus ??
-            obj.status,
-        );
+          purchase?.transactionStatus ??
+          obj.purchaseStatus ??
+          obj.transactionStatus ??
+          obj.accessStatus ??
+          obj.subscriptionStatus ??
+          membership?.status ??
+          obj.status;
+
+        const rawStatus = explicitlyBlocked
+          ? 'BLOCKED'
+          : rawCandidate !== undefined
+            ? extractStatusString(rawCandidate)
+            : explicitAccessTrue
+              ? 'ACTIVE'
+              : 'ACTIVE';
+
+        let normalizedStatus = normalizeTransactionStatus(rawStatus);
+        if (normalizedStatus === 'REVOKED' && !explicitlyBlocked && explicitAccessTrue) {
+          normalizedStatus = 'AUTHORIZED';
+        }
+
+        writeSyncDebugLog({
+          extId,
+          title: String(titleCandidate).trim(),
+          rawStatus,
+          normalizedStatus,
+          explicitlyBlocked,
+          explicitAccessTrue,
+          clubCandidate: clubCandidate ?? null,
+          statusSnapshot: {
+            purchaseStatus: purchase?.status ?? null,
+            objPurchaseStatus: obj.purchaseStatus ?? null,
+            objTransactionStatus: obj.transactionStatus ?? null,
+            objAccessStatus: obj.accessStatus ?? null,
+            objStatus: obj.status ?? null,
+            hasAccess: obj.hasAccess ?? null,
+            blocked: obj.blocked ?? obj.isBlocked ?? null,
+          },
+        });
+
         const coverCandidate =
           product?.cover ?? product?.coverImage ?? obj.coverUrl ?? obj.image ?? obj.thumbnail;
         found.push({
@@ -235,7 +304,7 @@ function extractPurchasesFromJson(responses: CapturedJsonResponse[]): PurchaseRe
             purchase?.transaction ?? obj.transaction ?? obj.purchaseRef ?? 'HM-LIVE',
           ),
           rawStatus,
-          normalizedStatus: normalizeTransactionStatus(rawStatus),
+          normalizedStatus,
           coverUrl: typeof coverCandidate === 'string' ? coverCandidate : undefined,
         });
       }

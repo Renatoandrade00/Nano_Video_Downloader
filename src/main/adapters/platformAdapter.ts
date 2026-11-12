@@ -108,6 +108,19 @@ const AUTHORIZED_STATUSES = new Set([
   'PUBLISHED',
   'FREE',
   'SUBSCRIBER',
+  'VALID',
+  'CONFIRMED',
+  'PURCHASED',
+  'OWNED',
+  'UNLOCKED',
+  'LIBERATED',
+  'NORMAL',
+  'REGULAR',
+  'OK',
+  'SUBSCRIPTION_ACTIVE',
+  'ACTIVE_SUBSCRIPTION',
+  'ACCESS_GRANTED',
+  'FINISHED',
 ]);
 
 export function normalizeTransactionStatus(rawStatus: RawTransactionStatus): LicenseStatus {
