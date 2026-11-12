@@ -72,7 +72,7 @@ function attachJsonInterceptor(
     dbg.attach('1.3');
     void dbg.sendCommand('Network.enable');
   } catch {
-    return { responses, detach: () => {} };
+    return { responses, detach: () => { } };
   }
 
   const onMessage = async (
@@ -398,36 +398,73 @@ export async function fetchLiveHotmartPurchases(
   }
 }
 
+function findModuleArray(root: unknown): Array<Record<string, unknown>> | null {
+  const queue: unknown[] = [root];
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (!cur) continue;
+    if (Array.isArray(cur) && cur.length > 0 && typeof cur[0] === 'object' && cur[0] !== null) {
+      const first = cur[0] as Record<string, unknown>;
+      if (
+        Array.isArray(first.pages) ||
+        Array.isArray(first.lessons) ||
+        Array.isArray(first.contents)
+      ) {
+        return cur as Array<Record<string, unknown>>;
+      }
+    }
+    if (typeof cur === 'object' && !Array.isArray(cur)) {
+      for (const v of Object.values(cur as Record<string, unknown>)) {
+        if (v && typeof v === 'object') queue.push(v);
+      }
+    }
+  }
+  return null;
+}
+
 function extractClubTreeFromJson(
   responses: CapturedJsonResponse[],
   courseExternalId: string,
+  resolvedBaseUrl: string,
 ): RemoteCourseTree | null {
   for (const res of responses) {
     const body = res.body as Record<string, unknown> | Array<Record<string, unknown>>;
-    const modulesArray = Array.isArray(body)
+    const directModules = Array.isArray(body)
       ? body
       : (body?.modules as Array<Record<string, unknown>> | undefined) ??
-        ((body?.data as Record<string, unknown> | undefined)?.modules as
-          | Array<Record<string, unknown>>
-          | undefined);
+      ((body?.data as Record<string, unknown> | undefined)?.modules as
+        | Array<Record<string, unknown>>
+        | undefined);
 
-    if (!Array.isArray(modulesArray) || modulesArray.length === 0) continue;
+    const modulesArray =
+      Array.isArray(directModules) &&
+        directModules.length > 0 &&
+        (Array.isArray(directModules[0]?.pages) ||
+          Array.isArray(directModules[0]?.lessons) ||
+          Array.isArray(directModules[0]?.contents))
+        ? directModules
+        : findModuleArray(body);
 
-    const first = modulesArray[0];
-    const hasPages = Array.isArray(first?.pages) || Array.isArray(first?.lessons);
-    if (!hasPages) continue;
+    if (!modulesArray || modulesArray.length === 0) continue;
+
+    const baseOrigin = (() => {
+      try {
+        return new URL(resolvedBaseUrl).origin;
+      } catch {
+        return resolvedBaseUrl.replace(/\/+$/, '');
+      }
+    })();
 
     const modules: RemoteModuleNode[] = modulesArray.map((mod, mIdx) => {
-      const pages = (mod.pages ?? mod.lessons ?? []) as Array<Record<string, unknown>>;
+      const pages = (mod.pages ?? mod.lessons ?? mod.contents ?? []) as Array<
+        Record<string, unknown>
+      >;
       const lessons: RemoteLessonNode[] = pages.map((p, lIdx) => {
         const pageId = String(p.hash ?? p.id ?? p.pageId ?? `${mIdx}_${lIdx}`);
-        const baseClubUrl = courseExternalId.startsWith('http')
-          ? courseExternalId.replace(/\/+$/, '')
-          : `https://${courseExternalId}.club.hotmart.com`;
         const lessonUrl =
           typeof p.url === 'string' && p.url.startsWith('http')
             ? p.url
-            : `${baseClubUrl}/lesson/${pageId}`;
+            : `${baseOrigin}/lesson/${pageId}`;
         const locked = Boolean(p.locked ?? p.isLocked ?? p.dripLocked);
         const hasMedia = p.hasMedia !== false && p.type !== 'TEXT';
 
@@ -468,19 +505,36 @@ async function resolveNumericCourseUrl(
 ): Promise<string> {
   const { win } = createHiddenSessionWindow(partitionName);
   const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
-  let resolvedPopupUrl: string | null = null;
+  let resolvedUrl: string | null = null;
+  let matchedTitle: string | null = null;
+  let clickedAccess = false;
+
+  const acceptCandidateUrl = (candidate: string) => {
+    if (!candidate || !isAllowedWebUrl(candidate)) return;
+    if (
+      /club\.hotmart\.com|hotmart\.club|go\.hotmart\.com|\/club\//i.test(candidate) &&
+      !/sso\.hotmart\.com/i.test(candidate)
+    ) {
+      resolvedUrl = candidate;
+    }
+  };
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedWebUrl(url) && !resolvedPopupUrl) {
-      resolvedPopupUrl = url;
-    }
+    acceptCandidateUrl(url);
     return { action: 'deny' };
   });
+  win.webContents.on('did-navigate', (_e, url) => acceptCandidateUrl(url));
+  win.webContents.on('did-navigate-in-page', (_e, url) => acceptCandidateUrl(url));
 
   try {
     await win.loadURL('https://consumer.hotmart.com');
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + 14000;
     while (Date.now() < deadline) {
+      if (resolvedUrl) {
+        writeSyncDebugLog({ event: 'resolveNumericCourseUrl', courseExternalId, resolvedUrl });
+        return resolvedUrl;
+      }
+
       for (const r of interceptor.responses) {
         const queue: unknown[] = [r.body];
         while (queue.length > 0) {
@@ -496,8 +550,17 @@ async function resolveNumericCourseUrl(
             String(product?.id ?? obj.productId ?? obj.courseId ?? obj.ucode ?? '') ===
             courseExternalId;
           if (idMatch) {
+            if (!matchedTitle) {
+              const t = product?.name ?? obj.productName ?? obj.courseName ?? obj.name ?? obj.title;
+              if (typeof t === 'string' && t.trim().length > 0) {
+                matchedTitle = t.trim();
+              }
+            }
             const url = extractClubUrlFromNode(obj);
-            if (url) return url;
+            if (url && /club\.hotmart\.com|hotmart\.club|go\.hotmart\.com/i.test(url)) {
+              writeSyncDebugLog({ event: 'resolveNumericCourseUrlJson', courseExternalId, url });
+              return url;
+            }
           }
           for (const v of Object.values(obj)) {
             if (v && typeof v === 'object') queue.push(v);
@@ -505,18 +568,36 @@ async function resolveNumericCourseUrl(
         }
       }
 
-      const domHref = (await win.webContents.executeJavaScript(
-        `(() => {
-          const id = ${JSON.stringify(courseExternalId)};
-          const links = Array.from(document.querySelectorAll('a[href]'));
-          const exact = links.find(a => a.href.includes(id) || a.href.includes('club.hotmart.com') || a.href.includes('go.hotmart.com'));
-          return exact ? exact.href : null;
-        })()`,
-        true,
-      )) as string | null;
+      if (!clickedAccess) {
+        const actionResult = (await win.webContents.executeJavaScript(
+          `(() => {
+            const id = ${JSON.stringify(courseExternalId)};
+            const title = ${JSON.stringify(matchedTitle ?? '')}.toLowerCase();
+            const links = Array.from(document.querySelectorAll('a[href]'));
+            const direct = links.find(a => a.href.includes(id) || a.href.includes('club.hotmart.com') || a.href.includes('go.hotmart.com'));
+            if (direct) return { href: direct.href, clicked: false };
+            if (!title) return { href: null, clicked: false };
+            const cards = Array.from(document.querySelectorAll('article, section, li, [class*="card"], [class*="Card"], div'));
+            const card = cards.find(c => (c.textContent || '').toLowerCase().includes(title) && /acessar|access/i.test(c.textContent || ''));
+            if (!card) return { href: null, clicked: false };
+            const btn = Array.from(card.querySelectorAll('button, a')).find(el => /acessar|access/i.test(el.textContent || ''));
+            if (btn) {
+              btn.click();
+              return { href: btn.getAttribute('href') || null, clicked: true };
+            }
+            return { href: null, clicked: false };
+          })()`,
+          true,
+        )) as { href: string | null; clicked: boolean };
 
-      if (resolvedPopupUrl) return resolvedPopupUrl;
-      if (domHref && /^https?:\/\//i.test(domHref)) return domHref;
+        if (actionResult.href && /^https?:\/\//i.test(actionResult.href)) {
+          acceptCandidateUrl(actionResult.href);
+          if (resolvedUrl) return resolvedUrl;
+        }
+        if (actionResult.clicked) {
+          clickedAccess = true;
+        }
+      }
 
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -525,6 +606,13 @@ async function resolveNumericCourseUrl(
     if (!win.isDestroyed()) win.close();
   }
 
+  writeSyncDebugLog({
+    event: 'resolveNumericCourseUrlFallback',
+    courseExternalId,
+    matchedTitle,
+    clickedAccess,
+    apiUrls: interceptor.responses.map((r) => r.url).slice(0, 15),
+  });
   return `https://consumer.hotmart.com`;
 }
 
@@ -551,7 +639,11 @@ export async function fetchLiveHotmartCatalog(
         throw new Error('Sessão Hotmart expirada ao abrir Hotmart Club.');
       }
 
-      const jsonTree = extractClubTreeFromJson(interceptor.responses, courseExternalId);
+      const jsonTree = extractClubTreeFromJson(
+        interceptor.responses,
+        courseExternalId,
+        currentUrl || clubUrl,
+      );
       if (jsonTree && jsonTree.modules.length > 0) {
         return jsonTree;
       }
