@@ -43,6 +43,15 @@ export const QueueView: React.FC<QueueViewProps> = ({
     await onRefreshJobs();
   };
 
+  const handleClearFailed = async () => {
+    await window.antigravity.queue.clearFailed();
+    await onRefreshJobs();
+  };
+
+  const errorJobsCount = jobs.filter(
+    (j) => j.state === 'FAILED' || j.state === 'REVOKED' || j.state === 'CANCELED',
+  ).length;
+
   const applyBandwidthLimit = async (kbPerSec: number | null) => {
     const bytesPerSec = kbPerSec && kbPerSec > 0 ? kbPerSec * 1024 : null;
     await window.antigravity.queue.setBandwidthLimit(bytesPerSec);
@@ -69,6 +78,13 @@ export const QueueView: React.FC<QueueViewProps> = ({
           </button>
           <button className="btn" onClick={() => void handleControl('resume')}>
             <Play size={14} /> Retomar Tudo
+          </button>
+          <button
+            className="btn btn-danger"
+            disabled={errorJobsCount === 0}
+            onClick={() => void handleClearFailed()}
+          >
+            <Trash2 size={14} /> Limpar Erros ({errorJobsCount})
           </button>
         </div>
       </div>

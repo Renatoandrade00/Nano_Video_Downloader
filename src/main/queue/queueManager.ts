@@ -80,8 +80,8 @@ export class QueueAndChunkManager {
     this.config = {
       stagingRootDir: config.stagingRootDir,
       getLibraryRootDir: config.getLibraryRootDir,
-      maxConcurrentLessons: config.maxConcurrentLessons ?? 2,
-      maxChunksPerLesson: config.maxChunksPerLesson ?? 4,
+      maxConcurrentLessons: config.maxConcurrentLessons ?? 1,
+      maxChunksPerLesson: config.maxChunksPerLesson ?? 3,
       maxSegmentRetries: config.maxSegmentRetries ?? 5,
       fetchFn: config.fetchFn ?? fetch,
     };
@@ -90,6 +90,20 @@ export class QueueAndChunkManager {
 
   listJobs(): DownloadJobRecord[] {
     return this.db.listJobs();
+  }
+
+  clearFailed(): number {
+    const { deletedCount, stagingDirs } = this.db.clearFailedJobs();
+    for (const dir of stagingDirs) {
+      if (dir && fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+        } catch {
+          // Best-effort staging cleanup
+        }
+      }
+    }
+    return deletedCount;
   }
 
   setBandwidthLimit(bytesPerSec: number | null): number | null {

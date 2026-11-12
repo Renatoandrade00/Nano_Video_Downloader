@@ -34,6 +34,7 @@ const bridge: NanoElectronBridge = {
       ipcRenderer.invoke('queue:enqueue', lessonIds, resolution),
     control: (action: 'pause' | 'resume' | 'cancel', jobId?: string) =>
       ipcRenderer.invoke('queue:control', action, jobId),
+    clearFailed: () => ipcRenderer.invoke('queue:clearFailed'),
     setBandwidthLimit: (bytesPerSec: number | null) =>
       ipcRenderer.invoke('queue:setBandwidthLimit', bytesPerSec),
   },

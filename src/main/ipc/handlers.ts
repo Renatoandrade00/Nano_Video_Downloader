@@ -56,6 +56,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
+  ipcMain.handle('queue:clearFailed', () => {
+    const deletedCount = deps.queue.clearFailed();
+    return { deletedCount };
+  });
+
   ipcMain.handle('queue:setBandwidthLimit', (_event, bytesPerSec: number | null) => {
     deps.db.saveSetting('bandwidthLimitBytesPerSec', bytesPerSec);
     const activeLimit = deps.queue.setBandwidthLimit(bytesPerSec);

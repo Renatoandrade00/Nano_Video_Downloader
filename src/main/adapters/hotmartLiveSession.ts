@@ -833,8 +833,9 @@ export async function resolveLiveHotmartLessonMedia(
     await safeLoadUrl(win, targetUrl);
 
     let clickedPlay = false;
+    let openedEmbed = false;
     const startMs = Date.now();
-    const deadline = startMs + 15000;
+    const deadline = startMs + 22000;
     while (Date.now() < deadline) {
       if (foundMedia) {
         return foundMedia;
@@ -843,10 +844,26 @@ export async function resolveLiveHotmartLessonMedia(
         return { kind: 'DRM_UNSUPPORTED' };
       }
 
+      if (!openedEmbed && Date.now() - startMs > 5500) {
+        const embedUrl = (await win.webContents.executeJavaScript(
+          `(() => {
+            const ifr = Array.from(document.querySelectorAll('iframe')).find(f => /play\\.hotmart\\.com\\/embed/i.test(f.src || ''));
+            return ifr ? ifr.src : null;
+          })()`,
+          true,
+        )) as string | null;
+        if (embedUrl) {
+          openedEmbed = true;
+          clickedPlay = false;
+          await safeLoadUrl(win, embedUrl);
+          continue;
+        }
+      }
+
       if (!clickedPlay && Date.now() - startMs > 2500) {
         clickedPlay = (await win.webContents.executeJavaScript(
           `(() => {
-            const btn = document.querySelector('button[aria-label*="play" i], button[title*="play" i], .vjs-big-play-button, [data-testid*="play" i]');
+            const btn = document.querySelector('button[aria-label*="play" i], button[title*="play" i], .vjs-big-play-button, [data-testid*="play" i], video');
             if (btn) { btn.click(); return true; }
             return false;
           })()`,

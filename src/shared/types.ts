@@ -203,6 +203,7 @@ export interface NanoElectronBridge {
       resolution: ResolutionOption,
     ): Promise<{ enqueuedJobIds: string[]; rejected: RejectedEnqueueItem[] }>;
     control(action: 'pause' | 'resume' | 'cancel', jobId?: string): Promise<{ ok: true }>;
+    clearFailed(): Promise<{ deletedCount: number }>;
     setBandwidthLimit(bytesPerSec: number | null): Promise<{ activeLimit: number | null }>;
   };
   player: {

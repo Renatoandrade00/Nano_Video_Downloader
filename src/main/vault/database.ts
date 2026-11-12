@@ -472,6 +472,32 @@ export class VaultDatabase {
     this.db.prepare('DELETE FROM segment_checkpoints WHERE job_id = ?').run(jobId);
   }
 
+  clearFailedJobs(): { deletedCount: number; stagingDirs: string[] } {
+    const rows = this.db
+      .prepare(
+        "SELECT id, staging_dir FROM download_jobs WHERE state IN ('FAILED', 'REVOKED', 'CANCELED')",
+      )
+      .all() as Array<{ id: string; staging_dir: string | null }>;
+
+    if (rows.length === 0) {
+      return { deletedCount: 0, stagingDirs: [] };
+    }
+
+    const stagingDirs = rows
+      .map((r) => r.staging_dir)
+      .filter((d): d is string => Boolean(d));
+
+    this.runInTransaction(() => {
+      for (const row of rows) {
+        this.db.prepare('DELETE FROM segment_checkpoints WHERE job_id = ?').run(row.id);
+        this.db.prepare('DELETE FROM forensic_watermarks WHERE job_id = ?').run(row.id);
+        this.db.prepare('DELETE FROM download_jobs WHERE id = ?').run(row.id);
+      }
+    });
+
+    return { deletedCount: rows.length, stagingDirs };
+  }
+
   private getSegmentCounts(jobId: string): {
     total: number;
     completed: number;
