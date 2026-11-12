@@ -31,6 +31,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return deps.catalog.syncAccountCourses(accountId);
   });
 
+  ipcMain.handle('catalog:listCourses', () => {
+    return deps.db.listAllCourses();
+  });
+
   ipcMain.handle('catalog:getOffline', () => {
     return deps.db.listOfflineCourses();
   });

@@ -37,16 +37,18 @@ export const App: React.FC = () => {
   const [revocationBanner, setRevocationBanner] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [accs, off, jbs, cfg] = await Promise.all([
+    const [accs, off, jbs, cfg, allCourses] = await Promise.all([
       window.antigravity.auth.listAccounts(),
       window.antigravity.catalog.getOffline(),
       window.antigravity.queue.listJobs(),
       window.antigravity.settings.get(),
+      window.antigravity.catalog.listCourses(),
     ]);
     setAccounts(accs);
     setOfflineCourses(off);
     setJobs(jbs);
     setSettings(cfg);
+    setCourses(allCourses);
     if (off.length === 0 && accs.filter((a) => a.status === 'CONNECTED').length === 0) {
       setTab('accounts');
     }
@@ -56,16 +58,15 @@ export const App: React.FC = () => {
     const accs = await window.antigravity.auth.listAccounts();
     setAccounts(accs);
     const connected = accs.filter((a) => a.status === 'CONNECTED');
-    const collected: CourseRecord[] = [];
     for (const acc of connected) {
       try {
-        const list = await window.antigravity.catalog.sync(acc.id);
-        collected.push(...list);
+        await window.antigravity.catalog.sync(acc.id);
       } catch {
         // Offline or expired session; keep offline catalog accessible
       }
     }
-    setCourses(collected);
+    const refreshed = await window.antigravity.catalog.listCourses();
+    setCourses(refreshed);
   }, []);
 
   useEffect(() => {
@@ -129,7 +130,10 @@ export const App: React.FC = () => {
 
           <button
             className={`nav-btn ${tab === 'catalog' ? 'active' : ''}`}
-            onClick={() => setTab('catalog')}
+            onClick={() => {
+              setTab('catalog');
+              void window.antigravity.catalog.listCourses().then(setCourses);
+            }}
           >
             <BookOpen size={17} />
             Catálogo Online
@@ -185,6 +189,7 @@ export const App: React.FC = () => {
           <CatalogView
             courses={courses}
             online={online}
+            onSync={syncAllConnectedCourses}
             onEnqueued={() => {
               void window.antigravity.queue.listJobs().then(setJobs);
               setTab('queue');

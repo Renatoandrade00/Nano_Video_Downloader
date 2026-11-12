@@ -36,7 +36,8 @@ export class AuthManager {
   async connectPlatform(platform: PlatformId): Promise<AccountRecord> {
     const adapter = this.adapters.get(platform);
     const config = adapter.getLoginConfig();
-    const accountId = `${platform}-${crypto.randomUUID().slice(0, 8)}`;
+    const existing = this.db.listAccounts().find((a) => a.platform === platform);
+    const accountId = existing ? existing.id : `${platform}-${crypto.randomUUID().slice(0, 8)}`;
 
     const captured = this.runWebBridge
       ? await this.runWebBridge(platform, accountId)

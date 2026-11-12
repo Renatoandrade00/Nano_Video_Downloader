@@ -10,6 +10,7 @@ interface CatalogViewProps {
   courses: CourseRecord[];
   online: boolean;
   onEnqueued: () => void;
+  onSync?: () => Promise<void>;
 }
 
 const RESOLUTIONS: ResolutionOption[] = ['1080p', '720p', '480p', '360p'];
@@ -18,12 +19,28 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   courses,
   online,
   onEnqueued,
+  onSync,
 }) => {
   const [selectedCourse, setSelectedCourse] = useState<CourseTreeDetails | null>(null);
   const [selectedLessonIds, setSelectedLessonIds] = useState<Set<string>>(new Set());
   const [resolution, setResolution] = useState<ResolutionOption>('1080p');
   const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  const handleSyncCatalog = async () => {
+    if (!onSync || isSyncing) return;
+    setIsSyncing(true);
+    setStatusMsg('Sincronizando catálogo com as plataformas...');
+    try {
+      await onSync();
+      setStatusMsg('Catálogo sincronizado com sucesso.');
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Falha ao sincronizar catálogo.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const openCourse = async (course: CourseRecord, forceRemote = false) => {
     setLoadingCourseId(course.id);
@@ -93,6 +110,17 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
         </div>
 
         <div className="row-gap">
+          {onSync && (
+            <button
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              disabled={isSyncing}
+              onClick={handleSyncCatalog}
+            >
+              <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+              {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+            </button>
+          )}
           <label style={{ fontSize: 13, color: 'var(--muted)' }}>Resolução:</label>
           <select
             className="select-input"
@@ -115,11 +143,21 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
       )}
 
       {courses.length === 0 ? (
-        <div className="card">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
           <p style={{ margin: 0, color: 'var(--muted)' }}>
-            Nenhum curso sincronizado ainda. Conecte uma conta na aba Contas e clique em
-            Sincronizar.
+            Nenhum curso sincronizado ainda. Conecte uma conta na aba Contas ou clique em Sincronizar.
           </p>
+          {onSync && (
+            <button
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              disabled={isSyncing}
+              onClick={handleSyncCatalog}
+            >
+              <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+              {isSyncing ? 'Sincronizando...' : 'Sincronizar Cursos Agora'}
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid-2">

@@ -35,6 +35,28 @@ export class VaultDatabase {
     }
     this.db = new DatabaseSync(dbPath);
     this.db.exec(VAULT_SCHEMA_SQL);
+    try {
+      // 1. Remove cursos duplicados mantendo o mais recente por external_course_id
+      this.db.exec(`
+        DELETE FROM courses
+        WHERE id NOT IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY external_course_id ORDER BY license_checked_at DESC) as rn
+            FROM courses
+          ) WHERE rn = 1
+        );
+      `);
+
+      // 2. Reatribui cursos órfãos para a conta conectada ativa mais recente
+      this.db.exec(`
+        UPDATE courses
+        SET account_id = (SELECT id FROM accounts WHERE status = 'CONNECTED' ORDER BY last_verified_at DESC LIMIT 1)
+        WHERE account_id NOT IN (SELECT id FROM accounts WHERE status = 'CONNECTED')
+          AND (SELECT count(*) FROM accounts WHERE status = 'CONNECTED') > 0;
+      `);
+    } catch {
+      // Ignore if table doesn't exist yet
+    }
   }
 
   close(): void {
@@ -93,6 +115,42 @@ export class VaultDatabase {
   // --- Courses, Modules, Lessons ---
 
   upsertCourse(course: CourseRecord): void {
+    const existingById = this.db
+      .prepare('SELECT id, account_id FROM courses WHERE id = ?')
+      .get(course.id) as { id: string; account_id: string } | undefined;
+
+    const existingByExt = this.db
+      .prepare('SELECT id, account_id FROM courses WHERE external_course_id = ?')
+      .get(course.externalCourseId) as { id: string; account_id: string } | undefined;
+
+    const targetId = existingById?.id ?? existingByExt?.id;
+
+    if (targetId) {
+      this.db
+        .prepare(
+          `UPDATE courses SET
+            account_id = ?,
+            external_course_id = ?,
+            title = ?,
+            sanitized_folder = ?,
+            license_status = ?,
+            license_checked_at = ?,
+            cover_local_path = COALESCE(?, cover_local_path)
+          WHERE id = ?`,
+        )
+        .run(
+          course.accountId,
+          course.externalCourseId,
+          course.title,
+          course.sanitizedFolder,
+          course.licenseStatus,
+          course.licenseCheckedAt,
+          course.coverLocalPath,
+          targetId,
+        );
+      return;
+    }
+
     this.db
       .prepare(
         `INSERT INTO courses (id, account_id, external_course_id, title, sanitized_folder, license_status, license_checked_at, cover_local_path)

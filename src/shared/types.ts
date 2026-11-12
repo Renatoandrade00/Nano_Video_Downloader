@@ -193,6 +193,7 @@ export interface NanoElectronBridge {
   };
   catalog: {
     sync(accountId: string): Promise<CourseRecord[]>;
+    listCourses(): Promise<CourseRecord[]>;
     getOffline(): Promise<CourseTreeDetails[]>;
     getCourseDetails(courseId: string, forceRemote?: boolean): Promise<CourseTreeDetails>;
   };

@@ -24,6 +24,7 @@ const bridge: NanoElectronBridge = {
   },
   catalog: {
     sync: (accountId: string) => ipcRenderer.invoke('catalog:sync', accountId),
+    listCourses: () => ipcRenderer.invoke('catalog:listCourses'),
     getOffline: () => ipcRenderer.invoke('catalog:getOffline'),
     getCourseDetails: (courseId: string, forceRemote?: boolean) =>
       ipcRenderer.invoke('course:getDetails', courseId, forceRemote),
