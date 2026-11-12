@@ -38,19 +38,34 @@ export const QueueView: React.FC<QueueViewProps> = ({
       : '',
   );
 
+  const [clearFeedback, setClearFeedback] = useState<string | null>(null);
+
   const handleControl = async (action: 'pause' | 'resume' | 'cancel', jobId?: string) => {
     await window.antigravity.queue.control(action, jobId);
     await onRefreshJobs();
   };
 
   const handleClearFailed = async () => {
-    await window.antigravity.queue.clearFailed();
-    await onRefreshJobs();
+    setClearFeedback(null);
+    try {
+      const res = await window.antigravity.queue.clearFailed();
+      await onRefreshJobs();
+      setClearFeedback(`${res.deletedCount} registro(s) com erro/cancelado(s) removido(s).`);
+    } catch (err) {
+      setClearFeedback(err instanceof Error ? err.message : 'Falha ao limpar erros.');
+    }
   };
 
-  const errorJobsCount = jobs.filter(
-    (j) => j.state === 'FAILED' || j.state === 'REVOKED' || j.state === 'CANCELED',
-  ).length;
+  // Deixa na tela da Fila apenas jobs na fila, em download/remux, pausados ou com erro (concluídos vão para Biblioteca Offline)
+  const visibleJobs = jobs.filter((j) => {
+    const liveState = progressByJob[j.id]?.state ?? j.state;
+    return liveState !== 'COMPLETED';
+  });
+
+  const errorJobsCount = visibleJobs.filter((j) => {
+    const liveState = progressByJob[j.id]?.state ?? j.state;
+    return liveState === 'FAILED' || liveState === 'REVOKED' || liveState === 'CANCELED';
+  }).length;
 
   const applyBandwidthLimit = async (kbPerSec: number | null) => {
     const bytesPerSec = kbPerSec && kbPerSec > 0 ? kbPerSec * 1024 : null;
@@ -124,6 +139,12 @@ export const QueueView: React.FC<QueueViewProps> = ({
         </div>
       </div>
 
+      {clearFeedback && (
+        <div className="card" style={{ padding: '10px 14px', fontSize: 13 }}>
+          {clearFeedback}
+        </div>
+      )}
+
       {moduleList.length > 0 && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <strong>Progresso por Módulo</strong>
@@ -143,15 +164,15 @@ export const QueueView: React.FC<QueueViewProps> = ({
         </div>
       )}
 
-      {jobs.length === 0 ? (
+      {visibleJobs.length === 0 ? (
         <div className="card">
           <p style={{ margin: 0, color: 'var(--muted)' }}>
-            Nenhuma tarefa na fila. Selecione aulas no Catálogo para iniciar o download.
+            Nenhum download pendente ou em andamento na fila. Os vídeos concluídos estão na Biblioteca Offline.
           </p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {jobs.map((job) => {
+          {visibleJobs.map((job) => {
             const live = progressByJob[job.id];
             const state = live?.state ?? job.state;
             const totalSegs = live?.totalSegments ?? job.totalSegments;

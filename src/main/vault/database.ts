@@ -490,7 +490,7 @@ export class VaultDatabase {
     this.runInTransaction(() => {
       for (const row of rows) {
         this.db.prepare('DELETE FROM segment_checkpoints WHERE job_id = ?').run(row.id);
-        this.db.prepare('DELETE FROM forensic_watermarks WHERE job_id = ?').run(row.id);
+        this.db.prepare('DELETE FROM audit_watermarks WHERE job_id = ?').run(row.id);
         this.db.prepare('DELETE FROM download_jobs WHERE id = ?').run(row.id);
       }
     });
