@@ -118,3 +118,13 @@ Indicado para desenvolvedores que desejam inspecionar o código, executar testes
 - [SPEC — Especificação Técnica do Sistema](./docs/nano_video_downloader_spec.md)
 - [SDD — Software Design Document](./docs/nano_video_downloader_sdd.md)
 - [TASKS — Roadmap e Lista de Tarefas](./docs/TASKS.md)
+
+---
+
+## 📄 Licença
+
+Este projeto é disponibilizado sob a **Licença de Uso Pessoal, Educacional e Não Comercial**, desenvolvida por **Renato Andrade — Nano S Tecnologia** ([nanostecnologia.com.br](https://nanostecnologia.com.br)).
+
+É permitida a utilização, estudo, modificação e redistribuição **estritamente gratuita**. É terminantemente **proibida qualquer comercialização, venda de cópias ou cobrança de acesso** pelo software ou por obras derivadas.
+
+Consulte o arquivo [`LICENSE`](./LICENSE) para visualizar os termos completos.

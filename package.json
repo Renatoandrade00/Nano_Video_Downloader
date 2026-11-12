@@ -2,6 +2,8 @@
   "name": "nano-video-downloader",
   "version": "1.0.0",
   "description": "Nano Video Downloader — Aplicação desktop offline-first baseada na arquitetura Google Antigravity para cursos adquiridos legitimamente.",
+  "author": "Renato Andrade — Nano S Tecnologia (https://nanostecnologia.com.br)",
+  "license": "SEE LICENSE IN LICENSE",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "vite",
