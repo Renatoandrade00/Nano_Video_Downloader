@@ -95,6 +95,26 @@ function registerLocalMediaProtocol(vaultDb: VaultDatabase): void {
   });
 }
 
+function resolveFfmpegBin(): string {
+  const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  if (process.resourcesPath) {
+    const packagedBin = path.join(process.resourcesPath, 'bin', exeName);
+    if (fs.existsSync(packagedBin)) {
+      return packagedBin;
+    }
+  }
+  try {
+    const appRoot = app.getAppPath();
+    const localBin = path.join(appRoot, 'bin', exeName);
+    if (fs.existsSync(localBin)) {
+      return localBin;
+    }
+  } catch {
+    // Non-electron/fallback
+  }
+  return 'ffmpeg';
+}
+
 function createWindow(): void {
   const isHeadlessE2E = process.env.NANO_OFFLINE_E2E === '1';
   mainWindow = new BrowserWindow({
@@ -180,7 +200,7 @@ app.whenReady().then(() => {
   });
   const catalog = new CatalogCrawler(db, auth, adapters, ownership);
   const inspector = new MediaStreamInspector();
-  const remuxer = new DecryptionAndRemuxer(secrets);
+  const remuxer = new DecryptionAndRemuxer(secrets, resolveFfmpegBin());
   const settings = db.getSettings(defaultSettings);
   const limiter = new BandwidthLimiter(settings.bandwidthLimitBytesPerSec);
 

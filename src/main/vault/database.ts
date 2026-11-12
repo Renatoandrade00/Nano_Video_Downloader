@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { padTwoDigits } from '../../shared/pathSanitizer';
 import {
   AccountRecord,
   AccountStatus,
@@ -126,7 +127,12 @@ export class VaultDatabase {
     const row = this.db
       .prepare('SELECT * FROM courses WHERE account_id = ? AND external_course_id = ?')
       .get(accountId, externalCourseId) as Record<string, unknown> | undefined;
-    return row ? mapCourse(row) : null;
+    if (row) return mapCourse(row);
+
+    const fallbackRow = this.db
+      .prepare('SELECT * FROM courses WHERE external_course_id = ? ORDER BY license_checked_at DESC')
+      .get(externalCourseId) as Record<string, unknown> | undefined;
+    return fallbackRow ? mapCourse(fallbackRow) : null;
   }
 
   listCoursesByAccount(accountId: string): CourseRecord[] {
@@ -211,6 +217,11 @@ export class VaultDatabase {
     const course = this.getCourse(courseId);
     if (!course) return null;
 
+    const rootDirRow = this.db
+      .prepare("SELECT value FROM app_settings WHERE key = 'libraryRootDir'")
+      .get() as { value?: string } | undefined;
+    const libraryRootDir = rootDirRow?.value;
+
     const moduleRows = this.db
       .prepare('SELECT * FROM modules WHERE course_id = ? ORDER BY order_index ASC')
       .all(courseId) as Array<Record<string, unknown>>;
@@ -223,6 +234,45 @@ export class VaultDatabase {
 
       const lessons: LessonWithProgress[] = lessonRows.map((lRow) => {
         const lesson = mapLesson(lRow);
+
+        let localFilePath = lesson.localFilePath;
+
+        if (!localFilePath && libraryRootDir) {
+          const modDir = path.join(libraryRootDir, course.sanitizedFolder, mod.sanitizedFolder);
+          if (fs.existsSync(modDir)) {
+            try {
+              const files = fs.readdirSync(modDir);
+              const prefix = `Aula_${padTwoDigits(lesson.orderIndex)} - `;
+              const foundFile = files.find((f) => f.startsWith(prefix) && f.endsWith('.mp4'));
+              if (foundFile) {
+                localFilePath = path.join(modDir, foundFile);
+                this.db
+                  .prepare('UPDATE lessons SET local_file_path = ? WHERE id = ?')
+                  .run(localFilePath, lesson.id);
+              }
+            } catch {
+              // Best-effort directory scan
+            }
+          }
+        }
+
+        if (!localFilePath) {
+          const altRow = this.db
+            .prepare(
+              `SELECT local_file_path FROM lessons
+               WHERE local_file_path IS NOT NULL AND title = ? AND order_index = ?
+               LIMIT 1`,
+            )
+            .get(lesson.title, lesson.orderIndex) as { local_file_path?: string } | undefined;
+          if (altRow?.local_file_path && fs.existsSync(altRow.local_file_path)) {
+            localFilePath = altRow.local_file_path;
+            this.db
+              .prepare('UPDATE lessons SET local_file_path = ? WHERE id = ?')
+              .run(localFilePath, lesson.id);
+          }
+        }
+
+        lesson.localFilePath = localFilePath;
         const progress = this.getPlaybackProgress(lesson.id);
         const job = this.getJobByLessonId(lesson.id);
         return { ...lesson, progress, job };
