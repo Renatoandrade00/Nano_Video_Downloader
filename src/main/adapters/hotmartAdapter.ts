@@ -220,7 +220,11 @@ export class HotmartAdapter implements IPlatformAdapter {
     lessonExternalId: string,
   ): Promise<MediaDescriptor> {
     if (this.shouldUseLiveElectronSession(session) && session.partitionName) {
-      return resolveLiveHotmartLessonMedia(session.partitionName, lessonExternalId);
+      return resolveLiveHotmartLessonMedia(
+        session.partitionName,
+        lessonExternalId,
+        courseExternalId,
+      );
     }
 
     const res = await this.fetchFn(

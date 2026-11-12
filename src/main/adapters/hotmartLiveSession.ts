@@ -10,6 +10,14 @@ import {
   normalizeTransactionStatus,
 } from './platformAdapter';
 
+const purchasesCache = new Map<string, { at: number; data: PurchaseRecord[] }>();
+const clubUrlCache = new Map<string, string>();
+
+function extractClubProductBase(url: string): string | null {
+  const m = url.match(/(https?:\/\/[^/]+(?:\/[^/]+)?\/club\/[^/]+\/products\/\d+)/i);
+  return m ? m[1] : null;
+}
+
 function getElectron() {
   // Dynamic import so unit tests running in plain Node/Vitest never crash loading Electron
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -338,6 +346,11 @@ function extractPurchasesFromJson(responses: CapturedJsonResponse[]): PurchaseRe
 export async function fetchLiveHotmartPurchases(
   partitionName: string,
 ): Promise<PurchaseRecord[]> {
+  const cached = purchasesCache.get(partitionName);
+  if (cached && Date.now() - cached.at < 45_000) {
+    return cached.data;
+  }
+
   const { win } = createHiddenSessionWindow(partitionName);
   const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
 
@@ -353,6 +366,7 @@ export async function fetchLiveHotmartPurchases(
 
       const jsonPurchases = extractPurchasesFromJson(interceptor.responses);
       if (jsonPurchases.length > 0) {
+        purchasesCache.set(partitionName, { at: Date.now(), data: jsonPurchases });
         return jsonPurchases;
       }
 
@@ -465,6 +479,7 @@ function extractClubTreeFromJson(
 
     if (!modulesArray || modulesArray.length === 0) continue;
 
+    const clubProductBase = extractClubProductBase(resolvedBaseUrl);
     const baseOrigin = (() => {
       try {
         return new URL(resolvedBaseUrl).origin;
@@ -486,7 +501,9 @@ function extractClubTreeFromJson(
         const lessonUrl =
           typeof p.url === 'string' && p.url.startsWith('http')
             ? p.url
-            : `${baseOrigin}/lesson/${pageId}`;
+            : clubProductBase
+              ? `${clubProductBase}/content/${pageId}`
+              : `${baseOrigin}/lesson/${pageId}`;
         const locked = Boolean(p.locked ?? p.isLocked ?? p.dripLocked);
         const hasMedia = p.hasMedia !== false && p.type !== 'TEXT';
 
@@ -525,6 +542,12 @@ async function resolveNumericCourseUrl(
   partitionName: string,
   courseExternalId: string,
 ): Promise<string> {
+  const cacheKey = `${partitionName}:${courseExternalId}`;
+  const cachedUrl = clubUrlCache.get(cacheKey);
+  if (cachedUrl) {
+    return cachedUrl;
+  }
+
   const { win } = createHiddenSessionWindow(partitionName);
   const interceptor = attachJsonInterceptor(win, /hotmart\.com/i);
   let resolvedUrl: string | null = null;
@@ -553,6 +576,7 @@ async function resolveNumericCourseUrl(
     const deadline = Date.now() + 14000;
     while (Date.now() < deadline) {
       if (resolvedUrl) {
+        clubUrlCache.set(cacheKey, resolvedUrl);
         writeSyncDebugLog({ event: 'resolveNumericCourseUrl', courseExternalId, resolvedUrl });
         return resolvedUrl;
       }
@@ -757,7 +781,18 @@ export async function fetchLiveHotmartCatalog(
 export async function resolveLiveHotmartLessonMedia(
   partitionName: string,
   lessonExternalId: string,
+  courseExternalId?: string,
 ): Promise<MediaDescriptor> {
+  let targetUrl = lessonExternalId;
+  const legacyMatch = lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i);
+  if (legacyMatch && courseExternalId && /^\d+$/.test(courseExternalId)) {
+    const clubUrl = await resolveNumericCourseUrl(partitionName, courseExternalId);
+    const clubProductBase = extractClubProductBase(clubUrl);
+    if (clubProductBase) {
+      targetUrl = `${clubProductBase}/content/${legacyMatch[1]}`;
+    }
+  }
+
   const { win, webSession } = createHiddenSessionWindow(partitionName);
 
   let foundMedia: MediaDescriptor | null = null;
@@ -795,15 +830,28 @@ export async function resolveLiveHotmartLessonMedia(
   webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, onBeforeSendHeaders);
 
   try {
-    await safeLoadUrl(win, lessonExternalId);
+    await safeLoadUrl(win, targetUrl);
 
-    const deadline = Date.now() + 12000;
+    let clickedPlay = false;
+    const startMs = Date.now();
+    const deadline = startMs + 15000;
     while (Date.now() < deadline) {
       if (foundMedia) {
         return foundMedia;
       }
       if (sawDrmLicense) {
         return { kind: 'DRM_UNSUPPORTED' };
+      }
+
+      if (!clickedPlay && Date.now() - startMs > 2500) {
+        clickedPlay = (await win.webContents.executeJavaScript(
+          `(() => {
+            const btn = document.querySelector('button[aria-label*="play" i], button[title*="play" i], .vjs-big-play-button, [data-testid*="play" i]');
+            if (btn) { btn.click(); return true; }
+            return false;
+          })()`,
+          true,
+        )) as boolean;
       }
 
       // Check <video src="..."> directly in case direct MP4 or blob-less source is present
@@ -829,6 +877,22 @@ export async function resolveLiveHotmartLessonMedia(
       }
 
       await new Promise((r) => setTimeout(r, 500));
+    }
+
+    if (!sawDrmLicense) {
+      const domDebug = (await win.webContents.executeJavaScript(
+        `(() => ({
+          iframes: Array.from(document.querySelectorAll('iframe')).map(f => f.src).slice(0, 6),
+          hasVideoTag: Boolean(document.querySelector('video')),
+        }))()`,
+        true,
+      )) as { iframes: string[]; hasVideoTag: boolean };
+      writeSyncDebugLog({
+        event: 'resolveLiveHotmartLessonMediaNoVideo',
+        targetUrl,
+        finalUrl: win.webContents.getURL(),
+        ...domDebug,
+      });
     }
 
     return sawDrmLicense ? { kind: 'DRM_UNSUPPORTED' } : { kind: 'NO_VIDEO' };
