@@ -48,16 +48,23 @@ function createHiddenSessionWindow(partitionName: string) {
   }
 
   const win = new BrowserWindow({
-    width: 1100,
-    height: 800,
+    width: 1366,
+    height: 768,
     show: false,
     webPreferences: {
       partition: partitionName,
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
+
+  try {
+    win.webContents.setBackgroundThrottling(false);
+  } catch {
+    // Ignore in older electron versions
+  }
 
   win.webContents.on('will-navigate', (event, url) => {
     if (!isAllowedWebUrl(url)) event.preventDefault();
@@ -69,7 +76,6 @@ function createHiddenSessionWindow(partitionName: string) {
     if (!isAllowedWebUrl(url)) event.preventDefault();
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!isAllowedWebUrl(url)) return { action: 'deny' };
     return { action: 'deny' };
   });
 
@@ -871,26 +877,38 @@ async function extractAttachmentsFromLessonPage(
           rawUrl = `https://hotmart.com${rawUrl}`;
         }
 
+        const hasPdfName = rawName.toLowerCase().includes('.pdf');
         const isPdfOrMaterial =
+          hasPdfName ||
           rawUrl.toLowerCase().includes('.pdf') ||
-          rawName.toLowerCase().includes('.pdf') ||
           obj.type === 'ATTACHMENT' ||
           obj.type === 'FILE' ||
           obj.type === 'MATERIAL' ||
           obj.mediaType === 'DOCUMENT' ||
           Boolean(obj.fileMembershipAttachmentId);
 
-        if (isPdfOrMaterial && rawUrl.startsWith('http') && !seenUrls.has(rawUrl)) {
-          seenUrls.add(rawUrl);
-          const fileName = rawName.length > 0 ? rawName : 'Material.pdf';
-          const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
-          result.push({
-            externalAttachmentId: String(obj.id ?? obj.fileMembershipAttachmentId ?? `${pageId}_att_${result.length}`),
-            fileName,
-            fileUrl: rawUrl,
-            fileType: String(obj.type ?? ext),
-            fileSize: typeof obj.size === 'number' ? obj.size : undefined,
-          });
+        if (isPdfOrMaterial) {
+          const attachmentId = String(obj.id ?? obj.fileMembershipAttachmentId ?? obj.attachmentId ?? '');
+          const effectiveUrl = rawUrl.startsWith('http')
+            ? rawUrl
+            : rawUrl.startsWith('/')
+              ? `https://hotmart.com${rawUrl}`
+              : attachmentId
+                ? `https://hotmart.com/club-content/api/v1/attachments/${attachmentId}/download-url`
+                : '';
+
+          if (effectiveUrl && !seenUrls.has(effectiveUrl)) {
+            seenUrls.add(effectiveUrl);
+            const fileName = rawName.length > 0 ? rawName : 'Material.pdf';
+            const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
+            result.push({
+              externalAttachmentId: attachmentId || `${pageId}_att_${result.length}`,
+              fileName,
+              fileUrl: effectiveUrl,
+              fileType: String(obj.type ?? ext),
+              fileSize: typeof obj.size === 'number' ? obj.size : undefined,
+            });
+          }
         }
         for (const v of Object.values(obj)) {
           if (v && typeof v === 'object') queue.push(v);
@@ -905,21 +923,21 @@ async function extractAttachmentsFromLessonPage(
       `(() => {
         const items = [];
         // Clicar na aba de Materiais se houver
-        const allElements = Array.from(document.querySelectorAll('button, [role="tab"], a, div, span, li'));
+        const allElements = Array.from(document.querySelectorAll('button, [role="tab"], a, div, span, li, p'));
         const matTab = allElements.find(el => {
           const t = (el.textContent || '').trim();
           const isTab = el.tagName === 'BUTTON' || el.getAttribute('role') === 'tab' || /tab/i.test(el.className || '');
           return isTab && /materiais/i.test(t);
         }) || allElements.find(el => {
           const t = (el.textContent || '').trim();
-          return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 4;
+          return /^materiais(\\s*\\(?\\d+\\)?)?$/i.test(t) && el.children.length <= 4;
         });
 
         if (matTab) {
           try { matTab.click(); } catch(e) {}
         }
 
-        // Links de arquivos diretos
+        // Links diretos
         const links = Array.from(document.querySelectorAll('a[href*=".pdf"], a[download], a[href*="attachment"], a[href*="material"], a[href*="download"], a[href*="s3"], a[href*="cloudfront"]'));
         for (const a of links) {
           const href = a.href || '';
@@ -932,19 +950,18 @@ async function extractAttachmentsFromLessonPage(
           items.push({ name: name.replace(/\\s+/g, ' ').trim(), url: href });
         }
 
-        // Blocos/Cards de materiais com texto .pdf (conforme visto na Hotmart)
-        const nodes = Array.from(document.querySelectorAll('div, li, section, p'));
+        // Cards de materiais com texto .pdf
+        const nodes = Array.from(document.querySelectorAll('div, li, section, p, span'));
         for (const node of nodes) {
-          const text = node.textContent || '';
-          if (text.includes('.pdf') && (text.includes('Download') || text.includes('KB') || text.includes('MB'))) {
-            const btn = node.querySelector('a, button');
-            const pdfMatch = text.match(/([^\\n\\r\\t]+\\.pdf)/i);
-            if (pdfMatch && btn) {
+          const text = (node.textContent || '').trim();
+          if (text.includes('.pdf') && text.length < 150) {
+            const pdfMatch = text.match(/([^\\n\\r\\t/]+\\.pdf)/i);
+            if (pdfMatch) {
               const name = pdfMatch[1].trim();
-              const url = btn.tagName === 'A' ? btn.href : (btn.getAttribute('data-url') || btn.getAttribute('data-href'));
-              if (url && url.startsWith('http')) {
-                items.push({ name, url });
-              }
+              const container = node.closest('div, li, section') || node.parentElement;
+              const linkOrBtn = container ? container.querySelector('a, button') : null;
+              const url = linkOrBtn ? (linkOrBtn.tagName === 'A' ? linkOrBtn.href : (linkOrBtn.getAttribute('data-url') || linkOrBtn.getAttribute('data-href') || '')) : '';
+              items.push({ name, url });
             }
           }
         }
@@ -955,13 +972,14 @@ async function extractAttachmentsFromLessonPage(
 
     if (domAtts) {
       for (const da of domAtts) {
-        if (!seenUrls.has(da.url)) {
-          seenUrls.add(da.url);
+        const uniqueKey = da.url || da.name;
+        if (!seenUrls.has(uniqueKey)) {
+          seenUrls.add(uniqueKey);
           const ext = da.name.includes('.') ? da.name.split('.').pop()! : 'pdf';
           result.push({
             externalAttachmentId: String(`${pageId}_dom_${result.length}`),
             fileName: da.name,
-            fileUrl: da.url,
+            fileUrl: da.url || `${pageId}_material_${result.length}`,
             fileType: ext,
           });
         }
@@ -1146,37 +1164,107 @@ export async function resolveLiveHotmartLessonAttachments(
     }
   }
 
-  const { win } = createHiddenSessionWindow(partitionName);
+  const { win, webSession } = createHiddenSessionWindow(partitionName);
   const interceptor = attachJsonInterceptor(win, /hotmart\.com|cloudfront|amazonaws/i);
+
+  const capturedDownloads = new Map<string, { url: string; size?: number }>();
+
+  const onWillDownload = (event: Electron.Event, item: Electron.DownloadItem) => {
+    event.preventDefault();
+    const url = item.getURL();
+    const filename = item.getFilename();
+    const totalBytes = item.getTotalBytes();
+    if (url && url.startsWith('http')) {
+      capturedDownloads.set(filename.toLowerCase(), { url, size: totalBytes > 0 ? totalBytes : undefined });
+      capturedDownloads.set('default', { url, size: totalBytes > 0 ? totalBytes : undefined });
+    }
+  };
+
+  webSession.on('will-download', onWillDownload);
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url && (url.includes('.pdf') || url.includes('attachment') || url.includes('cloudfront') || url.includes('s3') || url.includes('hotmart'))) {
+      capturedDownloads.set('popup_download', { url });
+    }
+    return { action: 'deny' };
+  });
 
   try {
     await safeLoadUrl(win, targetUrl);
 
+    let clickedMatTab = false;
+    let clickedDownloadBtn = false;
     const startMs = Date.now();
-    const deadline = startMs + 10000;
+    const deadline = startMs + 22000;
+
     while (Date.now() < deadline) {
       const currentUrl = win.webContents.getURL();
       if (/sso\.hotmart\.com\/login/i.test(currentUrl) && Date.now() - startMs > 3500) {
         throw new Error('Sessão Hotmart expirada. Por favor, reconecte sua conta na aba Contas & Cofre.');
       }
 
-      await win.webContents
-        .executeJavaScript(
-          `(() => {
-            const els = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li'));
-            const matTab = els.find(el => {
-              const t = (el.textContent || '').trim();
-              return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 2;
-            });
-            if (matTab) {
-              try { matTab.click(); } catch(e) {}
-            }
-          })()`,
-          true,
-        )
-        .catch(() => {});
+      // 1. Clicar na aba "Materiais" assim que aparecer no DOM
+      if (!clickedMatTab && Date.now() - startMs > 2000) {
+        clickedMatTab = (await win.webContents
+          .executeJavaScript(
+            `(() => {
+              const all = Array.from(document.querySelectorAll('button, [role="tab"], a, div, span, p, li'));
+              const tab = all.find(el => {
+                const t = (el.textContent || '').trim();
+                const isTab = el.tagName === 'BUTTON' || el.getAttribute('role') === 'tab' || /tab/i.test(el.className || '');
+                return isTab && /materiais/i.test(t);
+              }) || all.find(el => /^materiais(\\s*\\(?\\d+\\)?)?$/i.test((el.textContent || '').trim()));
+
+              if (tab) {
+                tab.click();
+                return true;
+              }
+              return false;
+            })()`,
+            true,
+          )
+          .catch(() => false)) as boolean;
+      }
+
+      // 2. Após abrir a aba Materiais, tentar clicar no botão de Download para disparar captura via will-download/popup
+      if (clickedMatTab && !clickedDownloadBtn && Date.now() - startMs > 4000) {
+        clickedDownloadBtn = (await win.webContents
+          .executeJavaScript(
+            `(() => {
+              const btns = Array.from(document.querySelectorAll('button, a'));
+              const target = btns.find(b => {
+                const t = (b.textContent || '').trim().toLowerCase();
+                return (t === 'download' || t === 'baixar' || b.getAttribute('download') !== null) && b.children.length <= 4;
+              });
+              if (target) {
+                target.click();
+                return true;
+              }
+              return false;
+            })()`,
+            true,
+          )
+          .catch(() => false)) as boolean;
+      }
 
       const atts = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+
+      // Integrar downloads capturados via evento nativo
+      if (capturedDownloads.size > 0) {
+        for (const [key, dl] of capturedDownloads.entries()) {
+          if (!atts.some((a) => a.fileUrl === dl.url)) {
+            const fileName = key.includes('.pdf') ? key : 'Material.pdf';
+            atts.push({
+              externalAttachmentId: `${lessonExternalId}_cap_${atts.length}`,
+              fileName,
+              fileUrl: dl.url,
+              fileType: 'pdf',
+              fileSize: dl.size,
+            });
+          }
+        }
+      }
+
       if (atts.length > 0) {
         writeSyncDebugLog({
           event: 'resolveLiveHotmartLessonAttachmentsSuccess',
@@ -1187,15 +1275,17 @@ export async function resolveLiveHotmartLessonAttachments(
         });
         return atts;
       }
+
       await new Promise((r) => setTimeout(r, 600));
     }
 
+    // Fallback: extração minuciosa no DOM
     const domDebug = (await win.webContents
       .executeJavaScript(
         `(() => {
-          const els = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li'));
-          const mat = els.filter(e => /materiais/i.test(e.textContent || '')).map(e => e.textContent.trim().slice(0, 30));
-          const pdfs = els.filter(e => (e.textContent || '').includes('.pdf')).map(e => e.textContent.trim().slice(0, 50));
+          const els = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li, p'));
+          const mat = els.filter(e => /materiais/i.test(e.textContent || '')).map(e => (e.textContent || '').trim().slice(0, 40));
+          const pdfs = els.filter(e => (e.textContent || '').includes('.pdf')).map(e => (e.textContent || '').trim().slice(0, 60));
           return {
             title: document.title,
             matCount: mat.length,
@@ -1209,6 +1299,20 @@ export async function resolveLiveHotmartLessonAttachments(
       .catch(() => ({ title: 'error', matCount: 0, matSamples: [], pdfCount: 0, pdfSamples: [] }))) as Record<string, unknown>;
 
     const fallbackAtts = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+
+    // Integrar downloads capturados
+    for (const [key, dl] of capturedDownloads.entries()) {
+      if (!fallbackAtts.some((a) => a.fileUrl === dl.url)) {
+        fallbackAtts.push({
+          externalAttachmentId: `${lessonExternalId}_cap_${fallbackAtts.length}`,
+          fileName: key.includes('.pdf') ? key : 'Material.pdf',
+          fileUrl: dl.url,
+          fileType: 'pdf',
+          fileSize: dl.size,
+        });
+      }
+    }
+
     writeSyncDebugLog({
       event: 'resolveLiveHotmartLessonAttachmentsResult',
       targetUrl,
@@ -1219,6 +1323,7 @@ export async function resolveLiveHotmartLessonAttachments(
     });
     return fallbackAtts;
   } finally {
+    webSession.off('will-download', onWillDownload);
     interceptor.detach();
     if (!win.isDestroyed()) win.close();
   }

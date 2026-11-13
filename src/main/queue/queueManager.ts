@@ -152,10 +152,30 @@ export class QueueAndChunkManager {
           }
         : {};
 
-      const res = await this.config.fetchFn(att.fileUrl, {
+      let downloadUrl = att.fileUrl;
+      let res = await this.config.fetchFn(downloadUrl, {
         method: 'GET',
         headers,
       });
+
+      // Se a resposta for um JSON com a URL assinada real do arquivo (padrão Hotmart Club API)
+      const contentType = (res.headers && typeof res.headers.get === 'function')
+        ? (res.headers.get('content-type') || '')
+        : '';
+      if (res.ok && contentType.includes('json')) {
+        try {
+          const json = (await res.json()) as Record<string, unknown>;
+          const direct = String(
+            json.url ?? json.downloadUrl ?? json.download_url ?? json.directUrl ?? '',
+          );
+          if (direct.startsWith('http')) {
+            downloadUrl = direct;
+            res = await this.config.fetchFn(downloadUrl, { method: 'GET' });
+          }
+        } catch {
+          // If JSON parse fails, proceed with original response buffer
+        }
+      }
 
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} ao baixar anexo: ${att.fileName}`);
