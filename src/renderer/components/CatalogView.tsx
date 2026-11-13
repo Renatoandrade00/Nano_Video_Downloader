@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckSquare, Download, Lock, RefreshCw, Square } from 'lucide-react';
+import { CheckSquare, Download, FileText, Lock, RefreshCw, Square } from 'lucide-react';
 import {
   CourseRecord,
   CourseTreeDetails,
@@ -24,6 +24,8 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [selectedCourse, setSelectedCourse] = useState<CourseTreeDetails | null>(null);
   const [selectedLessonIds, setSelectedLessonIds] = useState<Set<string>>(new Set());
   const [resolution, setResolution] = useState<ResolutionOption>('1080p');
+  const [downloadVideos, setDownloadVideos] = useState<boolean>(true);
+  const [downloadAttachments, setDownloadAttachments] = useState<boolean>(true);
   const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -79,24 +81,48 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
 
   const enqueueIds = async (lessonIds: string[]) => {
     if (lessonIds.length === 0) return;
+    if (!downloadVideos && !downloadAttachments) {
+      setStatusMsg('Selecione ao menos uma opção: Vídeos ou Arquivos/PDFs.');
+      return;
+    }
     setStatusMsg(null);
-    const res = await window.antigravity.queue.enqueue(lessonIds, resolution);
+    const res = await window.antigravity.queue.enqueue(lessonIds, resolution, {
+      downloadVideos,
+      downloadAttachments,
+    });
+    const parts: string[] = [];
     if (res.enqueuedJobIds.length > 0) {
+      parts.push(`${res.enqueuedJobIds.length} vídeo(s)`);
+    }
+    if ((res.enqueuedAttachmentCount ?? 0) > 0) {
+      parts.push(`${res.enqueuedAttachmentCount} arquivo(s) de apoio`);
+    }
+    if (parts.length > 0) {
       setStatusMsg(
-        `${res.enqueuedJobIds.length} aula(s) enfileirada(s) em ${resolution}.${res.rejected.length > 0 ? ` (${res.rejected.length} rejeitada(s))` : ''}`,
+        `${parts.join(' e ')} enfileirado(s).${res.rejected.length > 0 ? ` (${res.rejected.length} rejeitada(s))` : ''}`,
       );
       setSelectedLessonIds(new Set());
       onEnqueued();
     } else if (res.rejected.length > 0) {
-      setStatusMsg(`Nenhuma aula enfileirada: ${res.rejected[0].reason}`);
+      setStatusMsg(`Nenhum item enfileirado: ${res.rejected[0].reason}`);
     }
+  };
+
+  const isLessonSelectable = (lesson: {
+    hasVideo: boolean;
+    availabilityStatus: string;
+    attachments?: unknown[];
+  }) => {
+    if (lesson.availabilityStatus !== 'AVAILABLE') return false;
+    const canVideo = downloadVideos && lesson.hasVideo;
+    const canAtt =
+      downloadAttachments && Boolean(lesson.attachments && lesson.attachments.length > 0);
+    return canVideo || canAtt;
   };
 
   const allAvailableLessonIds =
     selectedCourse?.modules.flatMap((m) =>
-      m.lessons
-        .filter((l) => l.hasVideo && l.availabilityStatus === 'AVAILABLE')
-        .map((l) => l.id),
+      m.lessons.filter(isLessonSelectable).map((l) => l.id),
     ) ?? [];
 
   return (
@@ -109,7 +135,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
           </p>
         </div>
 
-        <div className="row-gap">
+        <div className="row-gap" style={{ flexWrap: 'wrap' }}>
           {onSync && (
             <button
               className="btn btn-primary"
@@ -121,10 +147,42 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
               {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
             </button>
           )}
+
+          <div
+            className="row-gap"
+            style={{
+              fontSize: 13,
+              background: 'var(--surface-variant, rgba(255,255,255,0.05))',
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+            }}
+          >
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={downloadVideos}
+                onChange={(e) => setDownloadVideos(e.target.checked)}
+              />
+              <span>Vídeos</span>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={downloadAttachments}
+                onChange={(e) => setDownloadAttachments(e.target.checked)}
+              />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <FileText size={13} /> Arquivos (.pdf)
+              </span>
+            </label>
+          </div>
+
           <label style={{ fontSize: 13, color: 'var(--muted)' }}>Resolução:</label>
           <select
             className="select-input"
             value={resolution}
+            disabled={!downloadVideos}
             onChange={(e) => setResolution(e.target.value as ResolutionOption)}
           >
             {RESOLUTIONS.map((r) => (
@@ -233,7 +291,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
 
           {selectedCourse.modules.map((mod) => {
             const selectableIds = mod.lessons
-              .filter((l) => l.hasVideo && l.availabilityStatus === 'AVAILABLE')
+              .filter(isLessonSelectable)
               .map((l) => l.id);
             const allModSelected =
               selectableIds.length > 0 && selectableIds.every((id) => selectedLessonIds.has(id));
@@ -274,8 +332,9 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                 </div>
 
                 {mod.lessons.map((lesson) => {
-                  const canSelect = lesson.hasVideo && lesson.availabilityStatus === 'AVAILABLE';
+                  const canSelect = isLessonSelectable(lesson);
                   const checked = selectedLessonIds.has(lesson.id);
+                  const attCount = lesson.attachments?.length ?? 0;
                   return (
                     <div key={lesson.id} className="lesson-row">
                       <div className="row-gap">
@@ -288,11 +347,38 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                         <span style={{ fontSize: 13 }}>
                           Aula {String(lesson.orderIndex).padStart(2, '0')} — {lesson.title}
                         </span>
+                        {attCount > 0 && (
+                          <span
+                            className="badge"
+                            title={`${attCount} arquivo(s) disponível(is)`}
+                            style={{
+                              backgroundColor: 'rgba(99,102,241,0.15)',
+                              color: '#818cf8',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: 11,
+                              padding: '2px 6px',
+                            }}
+                          >
+                            <FileText size={11} />
+                            {attCount} {attCount === 1 ? 'PDF/anexo' : 'PDFs/anexos'}
+                          </span>
+                        )}
                       </div>
                       <div className="row-gap">
                         {lesson.localFilePath && (
-                          <span className="badge badge-success">Baixada</span>
+                          <span className="badge badge-success">Vídeo Baixado</span>
                         )}
+                        {lesson.attachments &&
+                          lesson.attachments.some((a) => Boolean(a.localFilePath)) && (
+                            <span
+                              className="badge badge-success"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <FileText size={11} /> Material Salvo
+                            </span>
+                          )}
                         {!canSelect && (
                           <span className="badge badge-warning">
                             <Lock size={11} style={{ marginRight: 4 }} />

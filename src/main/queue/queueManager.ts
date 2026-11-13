@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildStructuredLessonPath } from '../../shared/pathSanitizer';
+import { buildStructuredAttachmentPath, buildStructuredLessonPath } from '../../shared/pathSanitizer';
 import {
   DownloadJobRecord,
   JobCompletedEvent,
@@ -111,13 +111,98 @@ export class QueueAndChunkManager {
     return this.limiter.getLimit();
   }
 
+  async downloadAttachment(
+    attachmentId: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }> {
+    const att = this.db.getAttachment(attachmentId);
+    if (!att) return { ok: false, error: 'ATTACHMENT_NOT_FOUND' };
+    const ctx = this.db.getLessonContext(att.lessonId);
+    if (!ctx) return { ok: false, error: 'LESSON_NOT_FOUND' };
+
+    const courseAccess = await this.ownership.verifyCourseAccess(ctx.course.id);
+    if (!courseAccess.authorized) {
+      return { ok: false, error: courseAccess.reason ?? 'OWNERSHIP_DENIED' };
+    }
+
+    const libraryRootDir = this.config.getLibraryRootDir();
+    const destPath = buildStructuredAttachmentPath({
+      libraryRootDir,
+      courseTitle: ctx.course.title,
+      moduleOrder: ctx.module.orderIndex,
+      lessonOrder: ctx.lesson.orderIndex,
+      fileName: att.fileName,
+    });
+
+    if (fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+      this.db.updateAttachmentLocalPath(att.id, destPath);
+      return { ok: true, path: destPath };
+    }
+
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    const tempDest = `${destPath}.tmp_${crypto.randomUUID().slice(0, 6)}`;
+
+    try {
+      const session = this.auth.getDecryptedSession(ctx.account.id);
+      const headers: Record<string, string> = session
+        ? {
+            ...(session.bearerToken ? { Authorization: `Bearer ${session.bearerToken}` } : {}),
+            ...(session.cookies.length > 0
+              ? { Cookie: session.cookies.map((c) => `${c.name}=${c.value}`).join('; ') }
+              : {}),
+          }
+        : {};
+
+      const res = await this.config.fetchFn(att.fileUrl, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ao baixar anexo: ${att.fileName}`);
+      }
+
+      const arrayBuf = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuf);
+      await this.limiter.consume(buf.length);
+      fs.writeFileSync(tempDest, buf);
+
+      fs.renameSync(tempDest, destPath);
+      this.db.updateAttachmentLocalPath(att.id, destPath);
+      return { ok: true, path: destPath };
+    } catch (err) {
+      if (fs.existsSync(tempDest)) {
+        try {
+          fs.unlinkSync(tempDest);
+        } catch {
+          // Ignore temp cleanup error
+        }
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async downloadLessonAttachments(lessonId: string): Promise<number> {
+    const atts = this.db.getLessonAttachments(lessonId);
+    let downloaded = 0;
+    for (const att of atts) {
+      const res = await this.downloadAttachment(att.id);
+      if (res.ok) downloaded++;
+    }
+    return downloaded;
+  }
+
   async enqueueLessons(
     lessonIds: string[],
     resolution: ResolutionOption,
-  ): Promise<{ enqueuedJobIds: string[]; rejected: RejectedEnqueueItem[] }> {
+    options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+  ): Promise<{ enqueuedJobIds: string[]; enqueuedAttachmentCount: number; rejected: RejectedEnqueueItem[] }> {
+    const downloadVideos = options?.downloadVideos ?? true;
+    const downloadAttachments = options?.downloadAttachments ?? true;
+
     const enqueuedJobIds: string[] = [];
     const rejected: RejectedEnqueueItem[] = [];
     const verifiedCourses = new Map<string, { authorized: boolean; reason?: string }>();
+    let enqueuedAttachmentCount = 0;
 
     for (const lessonId of lessonIds) {
       const ctx = this.db.getLessonContext(lessonId);
@@ -125,7 +210,18 @@ export class QueueAndChunkManager {
         rejected.push({ lessonId, reason: 'LESSON_NOT_FOUND' });
         continue;
       }
-      if (!ctx.lesson.hasVideo || ctx.lesson.availabilityStatus !== 'AVAILABLE') {
+
+      if (ctx.lesson.availabilityStatus === 'LOCKED_DRIP' || ctx.lesson.availabilityStatus === 'DRM_UNSUPPORTED') {
+        rejected.push({ lessonId, reason: ctx.lesson.availabilityStatus });
+        continue;
+      }
+
+      const attachments = this.db.getLessonAttachments(lessonId);
+      const hasAttachments = attachments.length > 0;
+      const canDownloadVideo = downloadVideos && ctx.lesson.hasVideo;
+      const canDownloadAttachments = downloadAttachments && hasAttachments;
+
+      if (!canDownloadVideo && !canDownloadAttachments) {
         rejected.push({ lessonId, reason: ctx.lesson.availabilityStatus });
         continue;
       }
@@ -140,37 +236,44 @@ export class QueueAndChunkManager {
         continue;
       }
 
-      const existing = this.db.getJobByLessonId(lessonId);
-      if (existing && (existing.state === 'DOWNLOADING' || existing.state === 'REMUXING' || existing.state === 'QUEUED')) {
-        enqueuedJobIds.push(existing.id);
-        continue;
+      if (canDownloadAttachments) {
+        void this.downloadLessonAttachments(lessonId);
+        enqueuedAttachmentCount += attachments.length;
       }
 
-      const jobId = existing?.id ?? `job_${crypto.randomUUID().slice(0, 8)}`;
-      const stagingDir = path.join(this.config.stagingRootDir, `${jobId}.antigravity-media`);
-      fs.mkdirSync(stagingDir, { recursive: true });
+      if (canDownloadVideo) {
+        const existing = this.db.getJobByLessonId(lessonId);
+        if (existing && (existing.state === 'DOWNLOADING' || existing.state === 'REMUXING' || existing.state === 'QUEUED')) {
+          enqueuedJobIds.push(existing.id);
+          continue;
+        }
 
-      const job: DownloadJobRecord = {
-        id: jobId,
-        lessonId,
-        targetResolution: resolution,
-        streamType: existing?.streamType ?? null,
-        state: 'QUEUED',
-        totalSegments: existing?.totalSegments ?? 0,
-        completedSegments: existing?.completedSegments ?? 0,
-        totalBytes: existing?.totalBytes ?? 0,
-        downloadedBytes: existing?.downloadedBytes ?? 0,
-        stagingDir,
-        errorCode: null,
-        updatedAt: new Date().toISOString(),
-      };
-      this.db.upsertJob(job);
-      enqueuedJobIds.push(jobId);
-      this.emitProgress(job, ctx.module.id, ctx.course.id, true);
+        const jobId = existing?.id ?? `job_${crypto.randomUUID().slice(0, 8)}`;
+        const stagingDir = path.join(this.config.stagingRootDir, `${jobId}.antigravity-media`);
+        fs.mkdirSync(stagingDir, { recursive: true });
+
+        const job: DownloadJobRecord = {
+          id: jobId,
+          lessonId,
+          targetResolution: resolution,
+          streamType: existing?.streamType ?? null,
+          state: 'QUEUED',
+          totalSegments: existing?.totalSegments ?? 0,
+          completedSegments: existing?.completedSegments ?? 0,
+          totalBytes: existing?.totalBytes ?? 0,
+          downloadedBytes: existing?.downloadedBytes ?? 0,
+          stagingDir,
+          errorCode: null,
+          updatedAt: new Date().toISOString(),
+        };
+        this.db.upsertJob(job);
+        enqueuedJobIds.push(jobId);
+        this.emitProgress(job, ctx.module.id, ctx.course.id, true);
+      }
     }
 
     this.schedulePump();
-    return { enqueuedJobIds, rejected };
+    return { enqueuedJobIds, enqueuedAttachmentCount, rejected };
   }
 
   control(action: 'pause' | 'resume' | 'cancel', jobId?: string): void {

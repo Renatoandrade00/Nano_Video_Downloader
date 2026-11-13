@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { formatCourseFolder, formatModuleFolder } from '../../shared/pathSanitizer';
-import { CourseRecord, CourseTreeDetails, LessonRecord, ModuleRecord } from '../../shared/types';
+import { CourseRecord, CourseTreeDetails, LessonAttachmentRecord, LessonRecord, ModuleRecord } from '../../shared/types';
 import { AdapterRegistry } from '../adapters/registry';
 import { AuthManager } from '../auth/authManager';
 import { OwnershipVerifier } from '../ownership/ownershipVerifier';
@@ -103,17 +103,32 @@ export class CatalogCrawler {
         title: m.title,
         sanitizedFolder: formatModuleFolder(m.orderIndex),
       };
-      const lessons: LessonRecord[] = m.lessons.map((l) => ({
-        id: `les_${crypto.randomUUID().slice(0, 8)}`,
-        moduleId: modId,
-        externalLessonId: l.externalLessonId,
-        orderIndex: l.orderIndex,
-        title: l.title,
-        durationSec: l.durationSec,
-        hasVideo: l.hasVideo,
-        availabilityStatus: l.availabilityStatus,
-        localFilePath: null,
-      }));
+      const lessons: LessonRecord[] = m.lessons.map((l) => {
+        const lessonId = `les_${crypto.randomUUID().slice(0, 8)}`;
+        const attachments: LessonAttachmentRecord[] = (l.attachments ?? []).map((att) => ({
+          id: `att_${crypto.randomUUID().slice(0, 8)}`,
+          lessonId,
+          externalAttachmentId: att.externalAttachmentId,
+          fileName: att.fileName,
+          fileUrl: att.fileUrl,
+          fileType: att.fileType,
+          fileSize: att.fileSize ?? null,
+          localFilePath: null,
+        }));
+
+        return {
+          id: lessonId,
+          moduleId: modId,
+          externalLessonId: l.externalLessonId,
+          orderIndex: l.orderIndex,
+          title: l.title,
+          durationSec: l.durationSec,
+          hasVideo: l.hasVideo,
+          availabilityStatus: l.availabilityStatus,
+          localFilePath: null,
+          attachments,
+        };
+      });
       return { module: modRecord, lessons };
     });
 

@@ -99,7 +99,20 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS lesson_attachments (
+    id TEXT PRIMARY KEY,
+    lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    external_attachment_id TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_url TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    file_size INTEGER,
+    local_file_path TEXT,
+    UNIQUE(lesson_id, external_attachment_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON download_jobs(state);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_pending ON segment_checkpoints(job_id, status);
+CREATE INDEX IF NOT EXISTS idx_attachments_lesson ON lesson_attachments(lesson_id);
 `;
 

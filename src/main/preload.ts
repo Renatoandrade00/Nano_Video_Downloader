@@ -31,13 +31,20 @@ const bridge: NanoElectronBridge = {
   },
   queue: {
     listJobs: () => ipcRenderer.invoke('queue:listJobs'),
-    enqueue: (lessonIds: string[], resolution: ResolutionOption) =>
-      ipcRenderer.invoke('queue:enqueue', lessonIds, resolution),
+    enqueue: (
+      lessonIds: string[],
+      resolution: ResolutionOption,
+      options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+    ) => ipcRenderer.invoke('queue:enqueue', lessonIds, resolution, options),
     control: (action: 'pause' | 'resume' | 'cancel', jobId?: string) =>
       ipcRenderer.invoke('queue:control', action, jobId),
     clearFailed: () => ipcRenderer.invoke('queue:clearFailed'),
     setBandwidthLimit: (bytesPerSec: number | null) =>
       ipcRenderer.invoke('queue:setBandwidthLimit', bytesPerSec),
+  },
+  attachments: {
+    openAttachment: (attachmentId: string) =>
+      ipcRenderer.invoke('attachments:open', attachmentId),
   },
   player: {
     openLesson: (lessonId: string) => ipcRenderer.invoke('player:openLesson', lessonId),

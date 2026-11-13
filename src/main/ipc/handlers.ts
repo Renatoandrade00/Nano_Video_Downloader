@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import { AppSettings, PlatformId, ResolutionOption } from '../../shared/types';
 import { AuthManager } from '../auth/authManager';
@@ -47,10 +47,32 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(
     'queue:enqueue',
-    async (_event, lessonIds: string[], resolution: ResolutionOption) => {
-      return deps.queue.enqueueLessons(lessonIds, resolution);
+    async (
+      _event,
+      lessonIds: string[],
+      resolution: ResolutionOption,
+      options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+    ) => {
+      return deps.queue.enqueueLessons(lessonIds, resolution, options);
     },
   );
+
+  ipcMain.handle('attachments:open', async (_event, attachmentId: string) => {
+    const att = deps.db.getAttachment(attachmentId);
+    if (!att) {
+      return { ok: false, error: 'Anexo não encontrado.' };
+    }
+    if (!att.localFilePath || !fs.existsSync(att.localFilePath)) {
+      const res = await deps.queue.downloadAttachment(attachmentId);
+      if (!res.ok || !res.path) {
+        return { ok: false, error: res.error ?? 'Falha ao baixar anexo.' };
+      }
+      await shell.openPath(res.path);
+      return { ok: true, path: res.path };
+    }
+    await shell.openPath(att.localFilePath);
+    return { ok: true, path: att.localFilePath };
+  });
 
   ipcMain.handle(
     'queue:control',

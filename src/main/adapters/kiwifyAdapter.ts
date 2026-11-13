@@ -134,6 +134,32 @@ export class KiwifyAdapter implements IPlatformAdapter {
         lessons: (mod.lessons ?? []).map((lesson, lIdx) => {
           const hasVideo = lesson.type ? lesson.type === 'video' : true;
           const locked = lesson.released === false;
+          const rawAtts = ((lesson as Record<string, unknown>).attachments ??
+            (lesson as Record<string, unknown>).files ??
+            []) as Array<Record<string, unknown>>;
+          const attachments = rawAtts
+            .map((att, aIdx) => {
+              const fileName = String(
+                att.name ?? att.fileName ?? att.file_name ?? att.title ?? `Material_${aIdx + 1}.pdf`,
+              );
+              const fileUrl = String(att.url ?? att.fileUrl ?? att.file_url ?? '');
+              const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
+              return {
+                externalAttachmentId: String(att.id ?? `${lesson.id}_att_${aIdx}`),
+                fileName,
+                fileUrl,
+                fileType: String(att.type ?? att.fileType ?? ext),
+                fileSize:
+                  typeof att.file_size === 'number'
+                    ? att.file_size
+                    : typeof att.size === 'number'
+                      ? att.size
+                      : undefined,
+              };
+            })
+            .filter((att) => Boolean(att.fileUrl));
+
+          const isAvailable = hasVideo || attachments.length > 0;
           return {
             externalLessonId: String(lesson.id),
             orderIndex: lesson.order ?? lIdx + 1,
@@ -142,9 +168,10 @@ export class KiwifyAdapter implements IPlatformAdapter {
             hasVideo,
             availabilityStatus: locked
               ? 'LOCKED_DRIP'
-              : hasVideo
+              : isAvailable
                 ? 'AVAILABLE'
                 : 'NO_VIDEO',
+            attachments,
           };
         }),
       })),

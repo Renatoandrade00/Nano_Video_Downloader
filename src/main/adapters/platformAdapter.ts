@@ -47,6 +47,14 @@ export interface OwnershipResult {
   checkedAt: string;
 }
 
+export interface RemoteAttachmentNode {
+  externalAttachmentId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize?: number;
+}
+
 export interface RemoteLessonNode {
   externalLessonId: string;
   orderIndex: number;
@@ -54,6 +62,7 @@ export interface RemoteLessonNode {
   durationSec: number;
   hasVideo: boolean;
   availabilityStatus: LessonAvailability;
+  attachments?: RemoteAttachmentNode[];
 }
 
 export interface RemoteModuleNode {

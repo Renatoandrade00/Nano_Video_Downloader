@@ -506,6 +506,23 @@ function extractClubTreeFromJson(
               : `${baseOrigin}/lesson/${pageId}`;
         const locked = Boolean(p.locked ?? p.isLocked ?? p.dripLocked);
         const hasMedia = p.hasMedia !== false && p.type !== 'TEXT';
+        const rawAtts = (p.attachments ?? p.files ?? p.materials ?? p.downloads ?? []) as Array<Record<string, unknown>>;
+        const attachments = rawAtts
+          .map((att, aIdx) => {
+            const fileName = String(att.name ?? att.fileName ?? att.file_name ?? att.title ?? `Material_${aIdx + 1}.pdf`);
+            const fileUrl = String(att.url ?? att.fileUrl ?? att.file_url ?? att.downloadUrl ?? '');
+            const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
+            return {
+              externalAttachmentId: String(att.id ?? `${pageId}_att_${aIdx}`),
+              fileName,
+              fileUrl,
+              fileType: String(att.type ?? att.fileType ?? ext),
+              fileSize: typeof att.size === 'number' ? att.size : undefined,
+            };
+          })
+          .filter((att) => Boolean(att.fileUrl));
+
+        const isAvailable = hasMedia || attachments.length > 0;
 
         return {
           externalLessonId: lessonUrl,
@@ -515,9 +532,10 @@ function extractClubTreeFromJson(
           hasVideo: hasMedia,
           availabilityStatus: locked
             ? 'LOCKED_DRIP'
-            : hasMedia
+            : isAvailable
               ? 'AVAILABLE'
               : 'NO_VIDEO',
+          attachments,
         };
       });
 

@@ -184,6 +184,26 @@ export class HotmartAdapter implements IPlatformAdapter {
           durationSec?: number;
           hasMedia?: boolean;
           locked?: boolean;
+          attachments?: Array<{
+            id?: string | number;
+            name?: string;
+            fileName?: string;
+            file_name?: string;
+            url?: string;
+            fileUrl?: string;
+            type?: string;
+            size?: number;
+          }>;
+          files?: Array<{
+            id?: string | number;
+            name?: string;
+            fileName?: string;
+            file_name?: string;
+            url?: string;
+            fileUrl?: string;
+            type?: string;
+            size?: number;
+          }>;
         }>;
       }>;
     };
@@ -197,6 +217,22 @@ export class HotmartAdapter implements IPlatformAdapter {
         title: mod.name,
         lessons: (mod.pages ?? []).map((page, lIdx) => {
           const hasVideo = page.hasMedia !== false;
+          const rawAtts = page.attachments ?? page.files ?? [];
+          const attachments = rawAtts
+            .map((att, aIdx) => {
+              const fileName = att.name ?? att.fileName ?? att.file_name ?? `Material_${aIdx + 1}.pdf`;
+              const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
+              return {
+                externalAttachmentId: String(att.id ?? `${page.id}_att_${aIdx}`),
+                fileName,
+                fileUrl: att.url ?? att.fileUrl ?? '',
+                fileType: att.type ?? ext,
+                fileSize: att.size,
+              };
+            })
+            .filter((att) => Boolean(att.fileUrl));
+
+          const isAvailable = hasVideo || attachments.length > 0;
           return {
             externalLessonId: String(page.id),
             orderIndex: page.order ?? lIdx + 1,
@@ -205,9 +241,10 @@ export class HotmartAdapter implements IPlatformAdapter {
             hasVideo,
             availabilityStatus: page.locked
               ? 'LOCKED_DRIP'
-              : hasVideo
+              : isAvailable
                 ? 'AVAILABLE'
                 : 'NO_VIDEO',
+            attachments,
           };
         }),
       })),

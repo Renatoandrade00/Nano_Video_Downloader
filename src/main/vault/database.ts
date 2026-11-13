@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { padTwoDigits } from '../../shared/pathSanitizer';
+import { formatAttachmentFileName, padTwoDigits } from '../../shared/pathSanitizer';
 import {
   AccountRecord,
   AccountStatus,
@@ -11,6 +11,7 @@ import {
   CourseTreeDetails,
   DownloadJobRecord,
   JobState,
+  LessonAttachmentRecord,
   LessonAvailability,
   LessonRecord,
   LessonWithProgress,
@@ -240,6 +241,16 @@ export class VaultDatabase {
            availability_status = excluded.availability_status,
            local_file_path = COALESCE(lessons.local_file_path, excluded.local_file_path)`,
       );
+      const attStmt = this.db.prepare(
+        `INSERT INTO lesson_attachments (id, lesson_id, external_attachment_id, file_name, file_url, file_type, file_size, local_file_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(lesson_id, external_attachment_id) DO UPDATE SET
+           file_name = excluded.file_name,
+           file_url = excluded.file_url,
+           file_type = excluded.file_type,
+           file_size = excluded.file_size,
+           local_file_path = COALESCE(lesson_attachments.local_file_path, excluded.local_file_path)`,
+      );
 
       for (const item of modules) {
         modStmt.run(
@@ -266,6 +277,25 @@ export class VaultDatabase {
             lesson.availabilityStatus,
             lesson.localFilePath,
           );
+
+          const existingLesson = this.db
+            .prepare('SELECT id FROM lessons WHERE module_id = ? AND external_lesson_id = ?')
+            .get(existingMod.id, lesson.externalLessonId) as { id: string } | undefined;
+
+          if (existingLesson && lesson.attachments && lesson.attachments.length > 0) {
+            for (const att of lesson.attachments) {
+              attStmt.run(
+                att.id,
+                existingLesson.id,
+                att.externalAttachmentId,
+                att.fileName,
+                att.fileUrl,
+                att.fileType,
+                att.fileSize ?? null,
+                att.localFilePath ?? null,
+              );
+            }
+          }
         }
       }
     });
@@ -331,9 +361,25 @@ export class VaultDatabase {
         }
 
         lesson.localFilePath = localFilePath;
+
+        const attachments = this.getLessonAttachments(lesson.id).map((att) => {
+          let attPath = att.localFilePath;
+          if (!attPath && libraryRootDir) {
+            const matDir = path.join(libraryRootDir, course.sanitizedFolder, mod.sanitizedFolder, 'Materiais');
+            const expectedFile = formatAttachmentFileName(lesson.orderIndex, att.fileName);
+            const candidate = path.join(matDir, expectedFile);
+            if (fs.existsSync(candidate)) {
+              attPath = candidate;
+              this.updateAttachmentLocalPath(att.id, attPath);
+            }
+          }
+          return { ...att, localFilePath: attPath };
+        });
+
+        lesson.attachments = attachments;
         const progress = this.getPlaybackProgress(lesson.id);
         const job = this.getJobByLessonId(lesson.id);
-        return { ...lesson, progress, job };
+        return { ...lesson, progress, job, attachments };
       });
 
       return { ...mod, lessons };
@@ -348,14 +394,18 @@ export class VaultDatabase {
     for (const course of courses) {
       const details = this.getCourseTreeDetails(course.id);
       if (!details) continue;
-      const hasOfflineLesson = details.modules.some((m) =>
-        m.lessons.some((l) => Boolean(l.localFilePath)),
+      const hasOfflineContent = details.modules.some((m) =>
+        m.lessons.some(
+          (l) => Boolean(l.localFilePath) || (l.attachments && l.attachments.some((a) => Boolean(a.localFilePath))),
+        ),
       );
-      if (hasOfflineLesson) {
+      if (hasOfflineContent) {
         const filteredModules = details.modules
           .map((m) => ({
             ...m,
-            lessons: m.lessons.filter((l) => Boolean(l.localFilePath)),
+            lessons: m.lessons.filter(
+              (l) => Boolean(l.localFilePath) || (l.attachments && l.attachments.some((a) => Boolean(a.localFilePath))),
+            ),
           }))
           .filter((m) => m.lessons.length > 0);
         result.push({ course: details.course, modules: filteredModules });
@@ -401,6 +451,26 @@ export class VaultDatabase {
     this.db
       .prepare('UPDATE lessons SET availability_status = ? WHERE id = ?')
       .run(availability, lessonId);
+  }
+
+  getLessonAttachments(lessonId: string): LessonAttachmentRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM lesson_attachments WHERE lesson_id = ? ORDER BY file_name ASC')
+      .all(lessonId) as Array<Record<string, unknown>>;
+    return rows.map(mapAttachment);
+  }
+
+  getAttachment(attachmentId: string): LessonAttachmentRecord | null {
+    const row = this.db.prepare('SELECT * FROM lesson_attachments WHERE id = ?').get(attachmentId) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? mapAttachment(row) : null;
+  }
+
+  updateAttachmentLocalPath(attachmentId: string, localFilePath: string | null): void {
+    this.db
+      .prepare('UPDATE lesson_attachments SET local_file_path = ? WHERE id = ?')
+      .run(localFilePath, attachmentId);
   }
 
   // --- Download Jobs & Segment Checkpoints ---
@@ -840,6 +910,19 @@ function mapProgress(row: Record<string, unknown>): PlaybackProgressRecord {
     isWatched: Number(row.is_watched) === 1,
     watchedAt: row.watched_at ? String(row.watched_at) : null,
     updatedAt: String(row.updated_at),
+  };
+}
+
+function mapAttachment(row: Record<string, unknown>): LessonAttachmentRecord {
+  return {
+    id: String(row.id),
+    lessonId: String(row.lesson_id),
+    externalAttachmentId: String(row.external_attachment_id),
+    fileName: String(row.file_name),
+    fileUrl: String(row.file_url),
+    fileType: String(row.file_type),
+    fileSize: row.file_size !== null && row.file_size !== undefined ? Number(row.file_size) : null,
+    localFilePath: row.local_file_path ? String(row.local_file_path) : null,
   };
 }
 

@@ -105,5 +105,86 @@ describe('SecureVault & VaultDatabase (RNF-01, RF-12, RF-13)', () => {
     expect(offline[0].modules[0].lessons[0].progress?.playbackSpeed).toBe(1.5);
     db.close();
   });
+
+  it('persists lesson attachments (PDFs) and lists offline lessons when only materials are downloaded', () => {
+    const db = new VaultDatabase(':memory:');
+    const now = new Date().toISOString();
+
+    db.upsertAccount({
+      id: 'acc2',
+      platform: 'hotmart',
+      externalUserId: 'u2',
+      emailHash: 'hash2',
+      credentialRef: 'cred_2',
+      status: 'CONNECTED',
+      lastVerifiedAt: now,
+    });
+
+    db.upsertCourse({
+      id: 'c2',
+      accountId: 'acc2',
+      externalCourseId: 'ext_c2',
+      title: 'Curso com PDFs',
+      sanitizedFolder: 'Curso com PDFs',
+      licenseStatus: 'AUTHORIZED',
+      licenseCheckedAt: now,
+      coverLocalPath: null,
+    });
+
+    db.upsertCourseTree('c2', [
+      {
+        module: {
+          id: 'm2',
+          courseId: 'c2',
+          externalModuleId: 'ext_m2',
+          orderIndex: 1,
+          title: 'Modulo Material',
+          sanitizedFolder: 'Modulo_01',
+        },
+        lessons: [
+          {
+            id: 'l_pdf',
+            moduleId: 'm2',
+            externalLessonId: 'ext_l_pdf',
+            orderIndex: 1,
+            title: 'Aula de Leitura',
+            durationSec: 0,
+            hasVideo: false,
+            availabilityStatus: 'AVAILABLE',
+            localFilePath: null,
+            attachments: [
+              {
+                id: 'att_1',
+                lessonId: 'l_pdf',
+                externalAttachmentId: 'ext_att_1',
+                fileName: 'Apostila_Capitulo_1.pdf',
+                fileUrl: 'https://cdn.exemplo.com/apostila.pdf',
+                fileType: 'pdf',
+                fileSize: 1024000,
+                localFilePath: null,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    const detailsBefore = db.getCourseTreeDetails('c2');
+    expect(detailsBefore?.modules[0].lessons[0].attachments).toHaveLength(1);
+    expect(detailsBefore?.modules[0].lessons[0].attachments?.[0].fileName).toBe('Apostila_Capitulo_1.pdf');
+
+    // Inicialmente nada baixado
+    expect(db.listOfflineCourses()).toHaveLength(0);
+
+    // Marca o PDF como baixado localmente
+    db.updateAttachmentLocalPath('att_1', '/tmp/library/Curso/Modulo_01/Materiais/Aula_01 - Apostila.pdf');
+
+    const offline = db.listOfflineCourses();
+    expect(offline).toHaveLength(1);
+    expect(offline[0].modules[0].lessons[0].id).toBe('l_pdf');
+    expect(offline[0].modules[0].lessons[0].attachments?.[0].localFilePath).toContain('.pdf');
+
+    db.close();
+  });
 });
 

@@ -70,6 +70,7 @@ export interface LessonRecord {
   hasVideo: boolean;
   availabilityStatus: LessonAvailability;
   localFilePath: string | null;
+  attachments?: LessonAttachmentRecord[];
 }
 
 export interface DownloadJobRecord {
@@ -114,9 +115,21 @@ export interface AuditWatermarkRecord {
   stampedAt: string;
 }
 
+export interface LessonAttachmentRecord {
+  id: string;
+  lessonId: string;
+  externalAttachmentId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number | null;
+  localFilePath: string | null;
+}
+
 export interface LessonWithProgress extends LessonRecord {
   progress: PlaybackProgressRecord | null;
   job: DownloadJobRecord | null;
+  attachments?: LessonAttachmentRecord[];
 }
 
 export interface ModuleWithLessons extends ModuleRecord {
@@ -202,10 +215,14 @@ export interface NanoElectronBridge {
     enqueue(
       lessonIds: string[],
       resolution: ResolutionOption,
-    ): Promise<{ enqueuedJobIds: string[]; rejected: RejectedEnqueueItem[] }>;
+      options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+    ): Promise<{ enqueuedJobIds: string[]; enqueuedAttachmentCount?: number; rejected: RejectedEnqueueItem[] }>;
     control(action: 'pause' | 'resume' | 'cancel', jobId?: string): Promise<{ ok: true }>;
     clearFailed(): Promise<{ deletedCount: number }>;
     setBandwidthLimit(bytesPerSec: number | null): Promise<{ activeLimit: number | null }>;
+  };
+  attachments: {
+    openAttachment(attachmentId: string): Promise<{ ok: boolean; path?: string; error?: string }>;
   };
   player: {
     openLesson(lessonId: string): Promise<PlayerOpenResult>;

@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildStructuredAttachmentPath,
   buildStructuredLessonPath,
+  formatAttachmentFileName,
   formatCourseFolder,
   formatLessonFileName,
   formatModuleFolder,
@@ -50,6 +52,25 @@ describe('pathSanitizer (RF-11)', () => {
     });
     expect(result.endsWith('.mp4')).toBe(true);
     expect(result.length).toBeLessThanOrEqual(245);
+  });
+
+  it('formats structured attachment path in Materiais subfolder with safe .pdf filename', () => {
+    const out = buildStructuredAttachmentPath({
+      libraryRootDir: '/tmp/library',
+      courseTitle: 'Arquitetura Avançada: Microsserviços',
+      moduleOrder: 2,
+      lessonOrder: 5,
+      fileName: 'Apostila Completa: Módulo 2?.pdf',
+    });
+
+    const expected = path.join(
+      '/tmp/library',
+      'Arquitetura Avançada Microsserviços',
+      'Modulo_02',
+      'Materiais',
+      'Aula_05 - Apostila Completa Módulo 2.pdf',
+    );
+    expect(out).toBe(expected);
   });
 });
 

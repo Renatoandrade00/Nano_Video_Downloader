@@ -72,3 +72,37 @@ export function buildStructuredLessonPath(input: LessonPathInput): string {
   return path.join(baseDir, fileName);
 }
 
+export interface AttachmentPathInput {
+  libraryRootDir: string;
+  courseTitle: string;
+  moduleOrder: number;
+  lessonOrder: number;
+  fileName: string;
+}
+
+export function formatAttachmentFileName(
+  lessonOrder: number,
+  originalFileName: string,
+  maxStemLength = 120,
+): string {
+  const prefix = `Aula_${padTwoDigits(lessonOrder)} - `;
+  const ext = path.extname(originalFileName) || '.pdf';
+  const nameWithoutExt = path.basename(originalFileName, ext);
+  const availableLen = Math.max(12, maxStemLength - prefix.length - ext.length);
+  const safeName = sanitizeSegment(nameWithoutExt, 'Material', availableLen);
+  return `${prefix}${safeName}${ext}`;
+}
+
+export function buildStructuredAttachmentPath(input: AttachmentPathInput): string {
+  const courseFolder = formatCourseFolder(input.courseTitle);
+  const moduleFolder = formatModuleFolder(input.moduleOrder);
+  const baseDir = path.join(input.libraryRootDir, courseFolder, moduleFolder, 'Materiais');
+
+  const ext = path.extname(input.fileName) || '.pdf';
+  const overhead = baseDir.length + 1 + ext.length;
+  const maxStemAllowed = Math.max(24, Math.min(120, SAFE_MAX_FULL_PATH_LEN - overhead));
+  const fileName = formatAttachmentFileName(input.lessonOrder, input.fileName, maxStemAllowed);
+
+  return path.join(baseDir, fileName);
+}
+
