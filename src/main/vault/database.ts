@@ -460,6 +460,30 @@ export class VaultDatabase {
     return rows.map(mapAttachment);
   }
 
+  upsertLessonAttachment(attachment: LessonAttachmentRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO lesson_attachments (id, lesson_id, external_attachment_id, file_name, file_url, file_type, file_size, local_file_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(lesson_id, external_attachment_id) DO UPDATE SET
+           file_name = excluded.file_name,
+           file_url = excluded.file_url,
+           file_type = excluded.file_type,
+           file_size = excluded.file_size,
+           local_file_path = COALESCE(lesson_attachments.local_file_path, excluded.local_file_path)`,
+      )
+      .run(
+        attachment.id,
+        attachment.lessonId,
+        attachment.externalAttachmentId,
+        attachment.fileName,
+        attachment.fileUrl,
+        attachment.fileType,
+        attachment.fileSize ?? null,
+        attachment.localFilePath ?? null,
+      );
+  }
+
   getAttachment(attachmentId: string): LessonAttachmentRecord | null {
     const row = this.db.prepare('SELECT * FROM lesson_attachments WHERE id = ?').get(attachmentId) as
       | Record<string, unknown>

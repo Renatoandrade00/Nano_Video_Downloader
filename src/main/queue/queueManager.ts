@@ -218,10 +218,10 @@ export class QueueAndChunkManager {
 
       const attachments = this.db.getLessonAttachments(lessonId);
       const hasAttachments = attachments.length > 0;
-      const canDownloadVideo = downloadVideos && ctx.lesson.hasVideo;
-      const canDownloadAttachments = downloadAttachments && hasAttachments;
+      const willDownloadVideo = downloadVideos && ctx.lesson.hasVideo;
+      const willDownloadAttachments = downloadAttachments;
 
-      if (!canDownloadVideo && !canDownloadAttachments) {
+      if (!willDownloadVideo && !willDownloadAttachments) {
         rejected.push({ lessonId, reason: ctx.lesson.availabilityStatus });
         continue;
       }
@@ -236,12 +236,12 @@ export class QueueAndChunkManager {
         continue;
       }
 
-      if (canDownloadAttachments) {
+      if (hasAttachments && downloadAttachments) {
         void this.downloadLessonAttachments(lessonId);
         enqueuedAttachmentCount += attachments.length;
       }
 
-      if (canDownloadVideo) {
+      if (willDownloadVideo || (downloadAttachments && !hasAttachments)) {
         const existing = this.db.getJobByLessonId(lessonId);
         if (existing && (existing.state === 'DOWNLOADING' || existing.state === 'REMUXING' || existing.state === 'QUEUED')) {
           enqueuedJobIds.push(existing.id);
@@ -391,6 +391,39 @@ export class QueueAndChunkManager {
         ctx.course.externalCourseId,
         ctx.lesson.externalLessonId,
       );
+
+      if (descriptor.attachments && descriptor.attachments.length > 0) {
+        for (const att of descriptor.attachments) {
+          const attId = `att_${crypto.randomUUID().slice(0, 8)}`;
+          this.db.upsertLessonAttachment({
+            id: attId,
+            lessonId: ctx.lesson.id,
+            externalAttachmentId: att.externalAttachmentId,
+            fileName: att.fileName,
+            fileUrl: att.fileUrl,
+            fileType: att.fileType,
+            fileSize: att.fileSize ?? null,
+            localFilePath: null,
+          });
+        }
+        await this.downloadLessonAttachments(ctx.lesson.id);
+      }
+
+      if (descriptor.kind === 'NO_VIDEO') {
+        if (descriptor.attachments && descriptor.attachments.length > 0) {
+          // Aula com apenas materiais (sem vídeo) - concluída com sucesso
+          this.db.updateJobState(jobId, 'COMPLETED', null, {
+            completedSegments: 1,
+            totalSegments: 1,
+          });
+          this.emitProgressByJobId(jobId, true);
+          return;
+        }
+        this.db.setLessonAvailability(ctx.lesson.id, 'NO_VIDEO');
+        this.db.updateJobState(jobId, 'FAILED', 'NO_VIDEO');
+        this.emitProgressByJobId(jobId, true);
+        return;
+      }
 
       if (descriptor.kind === 'DRM_UNSUPPORTED') {
         this.db.setLessonAvailability(ctx.lesson.id, 'DRM_UNSUPPORTED');

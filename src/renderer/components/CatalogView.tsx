@@ -114,10 +114,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     attachments?: unknown[];
   }) => {
     if (lesson.availabilityStatus !== 'AVAILABLE') return false;
-    const canVideo = downloadVideos && lesson.hasVideo;
-    const canAtt =
-      downloadAttachments && Boolean(lesson.attachments && lesson.attachments.length > 0);
-    return canVideo || canAtt;
+    return downloadVideos || downloadAttachments;
   };
 
   const allAvailableLessonIds =
@@ -266,7 +263,8 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
             <div>
               <strong style={{ fontSize: 16 }}>{selectedCourse.course.title}</strong>
               <p className="page-desc">
-                Selecione aulas ou módulos inteiros para enfileirar em lote.
+                Selecione aulas ou módulos inteiros para enfileirar em lote. Ao marcar "Arquivos (.pdf)",
+                os materiais disponíveis na aba "Materiais" de cada aula serão baixados automaticamente para a pasta Materiais.
               </p>
             </div>
             <div className="row-gap">

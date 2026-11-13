@@ -4,6 +4,7 @@ import { isAllowedWebUrl } from '../../shared/urlGuard';
 import {
   MediaDescriptor,
   PurchaseRecord,
+  RemoteAttachmentNode,
   RemoteCourseTree,
   RemoteLessonNode,
   RemoteModuleNode,
@@ -796,6 +797,126 @@ export async function fetchLiveHotmartCatalog(
   }
 }
 
+async function extractAttachmentsFromLessonPage(
+  win: Electron.BrowserWindow,
+  responses: CapturedJsonResponse[],
+  pageId: string,
+): Promise<RemoteAttachmentNode[]> {
+  const result: RemoteAttachmentNode[] = [];
+  const seenUrls = new Set<string>();
+
+  // 1. Procurar em respostas JSON interceptadas
+  for (const r of responses) {
+    const queue: unknown[] = [r.body];
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      if (!cur) continue;
+      if (Array.isArray(cur)) {
+        for (const item of cur) queue.push(item);
+      } else if (typeof cur === 'object') {
+        const obj = cur as Record<string, unknown>;
+        const rawUrl = String(
+          obj.url ?? obj.fileUrl ?? obj.file_url ?? obj.downloadUrl ?? obj.download_url ?? '',
+        );
+        const rawName = String(
+          obj.name ?? obj.fileName ?? obj.file_name ?? obj.title ?? '',
+        );
+        const isPdfOrMaterial =
+          rawUrl.includes('.pdf') ||
+          rawName.includes('.pdf') ||
+          obj.type === 'ATTACHMENT' ||
+          obj.type === 'FILE' ||
+          obj.type === 'MATERIAL';
+
+        if (isPdfOrMaterial && rawUrl.startsWith('http') && !seenUrls.has(rawUrl)) {
+          seenUrls.add(rawUrl);
+          const fileName = rawName.length > 0 ? rawName : 'Material.pdf';
+          const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
+          result.push({
+            externalAttachmentId: String(obj.id ?? `${pageId}_att_${result.length}`),
+            fileName,
+            fileUrl: rawUrl,
+            fileType: String(obj.type ?? ext),
+            fileSize: typeof obj.size === 'number' ? obj.size : undefined,
+          });
+        }
+        for (const v of Object.values(obj)) {
+          if (v && typeof v === 'object') queue.push(v);
+        }
+      }
+    }
+  }
+
+  // 2. Extração no DOM (clicando na aba Materiais se presente)
+  try {
+    const domAtts = (await win.webContents.executeJavaScript(
+      `(() => {
+        const items = [];
+        // Clicar na aba de Materiais se houver
+        const allElements = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li'));
+        const matTab = allElements.find(el => {
+          const t = (el.textContent || '').trim();
+          return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 2;
+        });
+        if (matTab) {
+          try { matTab.click(); } catch(e) {}
+        }
+
+        // Links de arquivos diretos
+        const links = Array.from(document.querySelectorAll('a[href*=".pdf"], a[download], a[href*="attachment"], a[href*="material"], a[href*="download"], a[href*="s3"], a[href*="cloudfront"]'));
+        for (const a of links) {
+          const href = a.href || '';
+          if (!href.startsWith('http')) continue;
+          const text = (a.textContent || '').trim();
+          const name = text.match(/([^\\n\\r]+\\.(pdf|zip|rar|docx?|xlsx?))/i)?.[1] ||
+                       a.getAttribute('download') ||
+                       text ||
+                       'Material.pdf';
+          items.push({ name: name.replace(/\\s+/g, ' ').trim(), url: href });
+        }
+
+        // Blocos/Cards de materiais com texto .pdf (conforme visto na Hotmart)
+        const nodes = Array.from(document.querySelectorAll('div, li, section, p'));
+        for (const node of nodes) {
+          const text = node.textContent || '';
+          if (text.includes('.pdf') && (text.includes('Download') || text.includes('KB') || text.includes('MB'))) {
+            const btn = node.querySelector('a, button');
+            const pdfMatch = text.match(/([^\\n\\r\\t]+\\.pdf)/i);
+            if (pdfMatch && btn) {
+              const name = pdfMatch[1].trim();
+              const url = btn.tagName === 'A' ? btn.href : (btn.getAttribute('data-url') || btn.getAttribute('data-href'));
+              if (url && url.startsWith('http')) {
+                items.push({ name, url });
+              }
+            }
+          }
+        }
+        return items;
+      })()`,
+      true,
+    )) as Array<{ name: string; url: string }> | null;
+
+    if (domAtts) {
+      for (const da of domAtts) {
+        if (!seenUrls.has(da.url)) {
+          seenUrls.add(da.url);
+          const ext = da.name.includes('.') ? da.name.split('.').pop()! : 'pdf';
+          result.push({
+            externalAttachmentId: String(`${pageId}_dom_${result.length}`),
+            fileName: da.name,
+            fileUrl: da.url,
+            fileType: ext,
+          });
+        }
+      }
+    }
+  } catch {
+    // Ignore DOM extraction errors
+  }
+
+  return result;
+}
+
 export async function resolveLiveHotmartLessonMedia(
   partitionName: string,
   lessonExternalId: string,
@@ -812,6 +933,7 @@ export async function resolveLiveHotmartLessonMedia(
   }
 
   const { win, webSession } = createHiddenSessionWindow(partitionName);
+  const interceptor = attachJsonInterceptor(win, /hotmart\.com|cloudfront|amazonaws/i);
 
   let foundMedia: MediaDescriptor | null = null;
   let sawDrmLicense = false;
@@ -856,10 +978,13 @@ export async function resolveLiveHotmartLessonMedia(
     const deadline = startMs + 22000;
     while (Date.now() < deadline) {
       if (foundMedia) {
-        return foundMedia;
+        const media = foundMedia as MediaDescriptor;
+        const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+        return { ...media, attachments };
       }
       if (sawDrmLicense) {
-        return { kind: 'DRM_UNSUPPORTED' };
+        const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+        return { kind: 'DRM_UNSUPPORTED', attachments };
       }
 
       if (!openedEmbed && Date.now() - startMs > 5500) {
@@ -901,6 +1026,7 @@ export async function resolveLiveHotmartLessonMedia(
       )) as string | null;
 
       if (videoSrc) {
+        const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
         return {
           kind: videoSrc.includes('.m3u8')
             ? 'HLS'
@@ -908,11 +1034,14 @@ export async function resolveLiveHotmartLessonMedia(
               ? 'DASH'
               : 'DIRECT',
           manifestUrl: videoSrc,
+          attachments,
         };
       }
 
       await new Promise((r) => setTimeout(r, 500));
     }
+
+    const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
 
     if (!sawDrmLicense) {
       const domDebug = (await win.webContents.executeJavaScript(
@@ -930,8 +1059,11 @@ export async function resolveLiveHotmartLessonMedia(
       });
     }
 
-    return sawDrmLicense ? { kind: 'DRM_UNSUPPORTED' } : { kind: 'NO_VIDEO' };
+    return sawDrmLicense
+      ? { kind: 'DRM_UNSUPPORTED', attachments }
+      : { kind: attachments.length > 0 ? 'DIRECT' : 'NO_VIDEO', attachments };
   } finally {
+    interceptor.detach();
     webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, null);
     if (!win.isDestroyed()) win.close();
   }

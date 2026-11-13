@@ -83,6 +83,7 @@ export interface MediaDescriptor {
   manifestUrl?: string;
   headers?: Record<string, string>;
   directContentLength?: number;
+  attachments?: RemoteAttachmentNode[];
 }
 
 export interface IPlatformAdapter {
