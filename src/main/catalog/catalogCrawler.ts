@@ -179,14 +179,28 @@ export class CatalogCrawler {
     if (!mod) return { totalFound: 0 };
 
     let totalFound = 0;
+    let lastError: Error | null = null;
     for (const lesson of mod.lessons) {
       try {
         const atts = await this.scanLessonAttachments(courseId, lesson.id);
         totalFound += atts.length;
-      } catch {
-        // Continue scanning next lesson
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        // Se a sessão expirou, interrompe o loop imediatamente para não ficar tentando à toa
+        if (
+          lastError.message.includes('Sessão') ||
+          lastError.message.includes('expirada') ||
+          lastError.message.includes('SESSION_EXPIRED')
+        ) {
+          throw lastError;
+        }
       }
     }
+
+    if (totalFound === 0 && lastError && mod.lessons.length > 0) {
+      throw lastError;
+    }
+
     return { totalFound };
   }
 }

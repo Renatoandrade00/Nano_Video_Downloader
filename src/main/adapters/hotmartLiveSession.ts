@@ -805,7 +805,36 @@ async function extractAttachmentsFromLessonPage(
   const result: RemoteAttachmentNode[] = [];
   const seenUrls = new Set<string>();
 
-  // 1. Procurar em respostas JSON interceptadas
+  // 1. Extrair payloads JSON embutidos no HTML do Next.js (__NEXT_DATA__ e scripts JSON)
+  try {
+    const inlineJsonList = (await win.webContents.executeJavaScript(
+      `(() => {
+        const payloads = [];
+        const nextScript = document.getElementById('__NEXT_DATA__');
+        if (nextScript && nextScript.textContent) {
+          try { payloads.push(JSON.parse(nextScript.textContent)); } catch(e) {}
+        }
+        const jsonScripts = Array.from(document.querySelectorAll('script[type="application/json"]'));
+        for (const s of jsonScripts) {
+          if (s !== nextScript && s.textContent && s.textContent.length > 5) {
+            try { payloads.push(JSON.parse(s.textContent)); } catch(e) {}
+          }
+        }
+        return payloads;
+      })()`,
+      true,
+    )) as unknown[];
+
+    for (const inlineBody of inlineJsonList) {
+      if (inlineBody) {
+        responses.push({ url: 'inline:__NEXT_DATA__', body: inlineBody });
+      }
+    }
+  } catch {
+    // Ignore inline extraction failures
+  }
+
+  // 2. Procurar recursivamente em todas as respostas JSON (Next.js props e XHR)
   for (const r of responses) {
     const queue: unknown[] = [r.body];
     while (queue.length > 0) {
@@ -870,17 +899,22 @@ async function extractAttachmentsFromLessonPage(
     }
   }
 
-  // 2. Extração no DOM (clicando na aba Materiais se presente)
+  // 3. Extração no DOM (clicando na aba Materiais e aguardando renderização)
   try {
     const domAtts = (await win.webContents.executeJavaScript(
       `(() => {
         const items = [];
         // Clicar na aba de Materiais se houver
-        const allElements = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li'));
+        const allElements = Array.from(document.querySelectorAll('button, [role="tab"], a, div, span, li'));
         const matTab = allElements.find(el => {
           const t = (el.textContent || '').trim();
-          return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 2;
+          const isTab = el.tagName === 'BUTTON' || el.getAttribute('role') === 'tab' || /tab/i.test(el.className || '');
+          return isTab && /materiais/i.test(t);
+        }) || allElements.find(el => {
+          const t = (el.textContent || '').trim();
+          return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 4;
         });
+
         if (matTab) {
           try { matTab.click(); } catch(e) {}
         }
@@ -1144,12 +1178,46 @@ export async function resolveLiveHotmartLessonAttachments(
 
       const atts = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
       if (atts.length > 0) {
+        writeSyncDebugLog({
+          event: 'resolveLiveHotmartLessonAttachmentsSuccess',
+          targetUrl,
+          finalUrl: win.webContents.getURL(),
+          foundCount: atts.length,
+          files: atts.map((a) => a.fileName),
+        });
         return atts;
       }
       await new Promise((r) => setTimeout(r, 600));
     }
 
-    return await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+    const domDebug = (await win.webContents
+      .executeJavaScript(
+        `(() => {
+          const els = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li'));
+          const mat = els.filter(e => /materiais/i.test(e.textContent || '')).map(e => e.textContent.trim().slice(0, 30));
+          const pdfs = els.filter(e => (e.textContent || '').includes('.pdf')).map(e => e.textContent.trim().slice(0, 50));
+          return {
+            title: document.title,
+            matCount: mat.length,
+            matSamples: mat.slice(0, 5),
+            pdfCount: pdfs.length,
+            pdfSamples: pdfs.slice(0, 5),
+          };
+        })()`,
+        true,
+      )
+      .catch(() => ({ title: 'error', matCount: 0, matSamples: [], pdfCount: 0, pdfSamples: [] }))) as Record<string, unknown>;
+
+    const fallbackAtts = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+    writeSyncDebugLog({
+      event: 'resolveLiveHotmartLessonAttachmentsResult',
+      targetUrl,
+      finalUrl: win.webContents.getURL(),
+      responsesCount: interceptor.responses.length,
+      foundCount: fallbackAtts.length,
+      ...domDebug,
+    });
+    return fallbackAtts;
   } finally {
     interceptor.detach();
     if (!win.isDestroyed()) win.close();
