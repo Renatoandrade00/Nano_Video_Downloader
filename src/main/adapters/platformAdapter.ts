@@ -103,6 +103,11 @@ export interface IPlatformAdapter {
     courseExternalId: string,
     lessonExternalId: string,
   ): Promise<MediaDescriptor>;
+  resolveLessonAttachments?(
+    session: DecryptedSession,
+    courseExternalId: string,
+    lessonExternalId: string,
+  ): Promise<RemoteAttachmentNode[]>;
 }
 
 const AUTHORIZED_STATUSES = new Set([

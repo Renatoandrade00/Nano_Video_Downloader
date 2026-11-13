@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { CheckSquare, Download, FileText, Lock, RefreshCw, Square } from 'lucide-react';
+import {
+  CheckSquare,
+  Download,
+  FileText,
+  FolderOpen,
+  Lock,
+  RefreshCw,
+  Search,
+  Square,
+} from 'lucide-react';
 import {
   CourseRecord,
   CourseTreeDetails,
@@ -15,6 +24,13 @@ interface CatalogViewProps {
 
 const RESOLUTIONS: ResolutionOption[] = ['1080p', '720p', '480p', '360p'];
 
+function formatBytes(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export const CatalogView: React.FC<CatalogViewProps> = ({
   courses,
   online,
@@ -29,6 +45,9 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [scanningModuleId, setScanningModuleId] = useState<string | null>(null);
+  const [scanningLessonId, setScanningLessonId] = useState<string | null>(null);
+  const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
 
   const handleSyncCatalog = async () => {
     if (!onSync || isSyncing) return;
@@ -55,6 +74,91 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
       setStatusMsg(err instanceof Error ? err.message : 'Erro ao carregar módulos do curso.');
     } finally {
       setLoadingCourseId(null);
+    }
+  };
+
+  const handleScanModule = async (moduleId: string) => {
+    if (!selectedCourse) return;
+    setScanningModuleId(moduleId);
+    setStatusMsg('Buscando PDFs e materiais nas páginas das aulas deste módulo...');
+    try {
+      const res = await window.antigravity.catalog.scanModuleAttachments(
+        selectedCourse.course.id,
+        moduleId,
+      );
+      setStatusMsg(
+        res.totalFound > 0
+          ? `Busca concluída! ${res.totalFound} arquivo(s) de apoio / PDF(s) encontrado(s).`
+          : 'Nenhum material novo encontrado neste módulo.',
+      );
+      const refreshed = await window.antigravity.catalog.getCourseDetails(
+        selectedCourse.course.id,
+        false,
+      );
+      setSelectedCourse(refreshed);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Falha ao buscar materiais do módulo.');
+    } finally {
+      setScanningModuleId(null);
+    }
+  };
+
+  const handleScanLesson = async (lessonId: string) => {
+    if (!selectedCourse) return;
+    setScanningLessonId(lessonId);
+    setStatusMsg('Buscando PDFs e materiais da aula na plataforma...');
+    try {
+      const atts = await window.antigravity.catalog.scanLessonAttachments(
+        selectedCourse.course.id,
+        lessonId,
+      );
+      setStatusMsg(
+        atts.length > 0
+          ? `${atts.length} arquivo(s) encontrado(s) na aula!`
+          : 'Nenhum material de apoio anexado a esta aula.',
+      );
+      const refreshed = await window.antigravity.catalog.getCourseDetails(
+        selectedCourse.course.id,
+        false,
+      );
+      setSelectedCourse(refreshed);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Falha ao buscar materiais da aula.');
+    } finally {
+      setScanningLessonId(null);
+    }
+  };
+
+  const handleDownloadAttachment = async (attachmentId: string) => {
+    if (!selectedCourse) return;
+    setDownloadingAttId(attachmentId);
+    try {
+      const res = await window.antigravity.attachments.downloadAttachment(attachmentId);
+      if (res.ok) {
+        setStatusMsg('Arquivo baixado com sucesso!');
+        const refreshed = await window.antigravity.catalog.getCourseDetails(
+          selectedCourse.course.id,
+          false,
+        );
+        setSelectedCourse(refreshed);
+      } else {
+        setStatusMsg(`Falha ao baixar arquivo: ${res.error ?? 'Erro desconhecido'}`);
+      }
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Erro ao baixar arquivo.');
+    } finally {
+      setDownloadingAttId(null);
+    }
+  };
+
+  const handleOpenAttachment = async (attachmentId: string) => {
+    try {
+      const res = await window.antigravity.attachments.openAttachment(attachmentId);
+      if (!res.ok) {
+        setStatusMsg(`Erro ao abrir arquivo: ${res.error}`);
+      }
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Erro ao abrir arquivo.');
     }
   };
 
@@ -318,72 +422,256 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       Módulo {String(mod.orderIndex).padStart(2, '0')} — {mod.title}
                     </button>
                   </div>
-                  <button
-                    className="btn"
-                    style={{ padding: '4px 10px', fontSize: 12 }}
-                    disabled={!online || selectableIds.length === 0}
-                    onClick={() => void enqueueIds(selectableIds)}
-                  >
-                    <Download size={13} />
-                    Baixar Módulo
-                  </button>
+                  <div className="row-gap">
+                    <button
+                      className="btn"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                      disabled={!online || scanningModuleId === mod.id}
+                      onClick={() => void handleScanModule(mod.id)}
+                      title="Buscar e listar todos os PDFs e arquivos de apoio das aulas deste módulo"
+                    >
+                      <FileText size={13} className={scanningModuleId === mod.id ? 'spin' : ''} />
+                      {scanningModuleId === mod.id ? 'Buscando PDFs...' : 'Buscar PDFs do Módulo'}
+                    </button>
+                    <button
+                      className="btn"
+                      style={{ padding: '4px 10px', fontSize: 12 }}
+                      disabled={!online || selectableIds.length === 0}
+                      onClick={() => void enqueueIds(selectableIds)}
+                    >
+                      <Download size={13} />
+                      Baixar Módulo
+                    </button>
+                  </div>
                 </div>
 
                 {mod.lessons.map((lesson) => {
                   const canSelect = isLessonSelectable(lesson);
                   const checked = selectedLessonIds.has(lesson.id);
                   const attCount = lesson.attachments?.length ?? 0;
+                  const isScanningThisLesson = scanningLessonId === lesson.id;
+
                   return (
-                    <div key={lesson.id} className="lesson-row">
-                      <div className="row-gap">
-                        <input
-                          type="checkbox"
-                          disabled={!canSelect}
-                          checked={checked}
-                          onChange={() => toggleLesson(lesson.id)}
-                        />
-                        <span style={{ fontSize: 13 }}>
-                          Aula {String(lesson.orderIndex).padStart(2, '0')} — {lesson.title}
-                        </span>
-                        {attCount > 0 && (
+                    <div
+                      key={lesson.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                        background: 'var(--surface-variant, rgba(255,255,255,0.02))',
+                        borderRadius: 8,
+                        padding: '6px 10px',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div
+                        className="lesson-row"
+                        style={{ padding: 0, border: 'none', background: 'transparent' }}
+                      >
+                        <div className="row-gap" style={{ flex: 1, minWidth: 0 }}>
+                          <input
+                            type="checkbox"
+                            disabled={!canSelect}
+                            checked={checked}
+                            onChange={() => toggleLesson(lesson.id)}
+                          />
                           <span
-                            className="badge"
-                            title={`${attCount} arquivo(s) disponível(is)`}
                             style={{
-                              backgroundColor: 'rgba(99,102,241,0.15)',
-                              color: '#818cf8',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              fontSize: 11,
-                              padding: '2px 6px',
+                              fontSize: 13,
+                              fontWeight: 500,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
-                            <FileText size={11} />
-                            {attCount} {attCount === 1 ? 'PDF/anexo' : 'PDFs/anexos'}
+                            Aula {String(lesson.orderIndex).padStart(2, '0')} — {lesson.title}
                           </span>
-                        )}
-                      </div>
-                      <div className="row-gap">
-                        {lesson.localFilePath && (
-                          <span className="badge badge-success">Vídeo Baixado</span>
-                        )}
-                        {lesson.attachments &&
-                          lesson.attachments.some((a) => Boolean(a.localFilePath)) && (
+                          {attCount > 0 && (
                             <span
-                              className="badge badge-success"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              className="badge"
+                              title={`${attCount} arquivo(s) de apoio nesta aula`}
+                              style={{
+                                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                color: '#f87171',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: 11,
+                                padding: '2px 6px',
+                                flexShrink: 0,
+                              }}
                             >
-                              <FileText size={11} /> Material Salvo
+                              <FileText size={11} />
+                              {attCount} {attCount === 1 ? 'PDF disponível' : 'PDFs disponíveis'}
                             </span>
                           )}
-                        {!canSelect && (
-                          <span className="badge badge-warning">
-                            <Lock size={11} style={{ marginRight: 4 }} />
-                            {lesson.availabilityStatus}
-                          </span>
-                        )}
+                        </div>
+
+                        <div className="row-gap" style={{ flexShrink: 0 }}>
+                          {attCount === 0 && online && (
+                            <button
+                              className="btn"
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: 11,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                              disabled={isScanningThisLesson}
+                              onClick={() => void handleScanLesson(lesson.id)}
+                              title="Buscar arquivos e PDFs na aba de materiais desta aula"
+                            >
+                              <Search size={11} className={isScanningThisLesson ? 'spin' : ''} />
+                              {isScanningThisLesson ? 'Buscando...' : 'Buscar Material'}
+                            </button>
+                          )}
+                          {lesson.localFilePath && (
+                            <span className="badge badge-success">Vídeo Baixado</span>
+                          )}
+                          {lesson.attachments &&
+                            lesson.attachments.some((a) => Boolean(a.localFilePath)) && (
+                              <span
+                                className="badge badge-success"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              >
+                                <FileText size={11} /> Material Salvo
+                              </span>
+                            )}
+                          {!canSelect && (
+                            <span className="badge badge-warning">
+                              <Lock size={11} style={{ marginRight: 4 }} />
+                              {lesson.availabilityStatus}
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      {attCount > 0 && (
+                        <div
+                          style={{
+                            marginLeft: 26,
+                            marginTop: 4,
+                            padding: '8px 12px',
+                            background: 'rgba(0, 0, 0, 0.25)',
+                            borderLeft: '3px solid #ef4444',
+                            borderRadius: '0 6px 6px 0',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: 'var(--muted)',
+                              textTransform: 'uppercase',
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            Materiais e PDFs da Aula ({attCount})
+                          </div>
+                          {lesson.attachments!.map((att) => {
+                            const isDownloading = downloadingAttId === att.id;
+                            const isDownloaded = Boolean(att.localFilePath);
+
+                            return (
+                              <div
+                                key={att.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: 12,
+                                  fontSize: 12,
+                                  padding: '4px 6px',
+                                  background: 'rgba(255, 255, 255, 0.03)',
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    minWidth: 0,
+                                  }}
+                                >
+                                  <FileText size={14} style={{ color: '#ef4444', flexShrink: 0 }} />
+                                  <span style={{ fontWeight: 500, wordBreak: 'break-all' }}>
+                                    {att.fileName}
+                                  </span>
+                                  {att.fileSize && (
+                                    <span
+                                      style={{
+                                        fontSize: 11,
+                                        color: 'var(--muted)',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      ({formatBytes(att.fileSize)})
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {isDownloaded ? (
+                                    <button
+                                      className="btn"
+                                      style={{
+                                        padding: '3px 8px',
+                                        fontSize: 11,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        background: 'rgba(16, 185, 129, 0.15)',
+                                        borderColor: 'rgba(16, 185, 129, 0.4)',
+                                        color: '#34d399',
+                                      }}
+                                      onClick={() => void handleOpenAttachment(att.id)}
+                                      title={`Abrir ${att.fileName}`}
+                                    >
+                                      <FolderOpen size={12} />
+                                      Abrir PDF
+                                    </button>
+                                  ) : (
+                                    <button
+                                      className="btn btn-primary"
+                                      style={{
+                                        padding: '3px 8px',
+                                        fontSize: 11,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                      }}
+                                      disabled={!online || isDownloading}
+                                      onClick={() => void handleDownloadAttachment(att.id)}
+                                      title={`Baixar ${att.fileName}`}
+                                    >
+                                      <Download size={12} className={isDownloading ? 'spin' : ''} />
+                                      {isDownloading ? 'Baixando...' : 'Baixar PDF'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

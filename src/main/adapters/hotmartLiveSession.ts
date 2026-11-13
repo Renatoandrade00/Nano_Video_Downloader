@@ -815,25 +815,48 @@ async function extractAttachmentsFromLessonPage(
         for (const item of cur) queue.push(item);
       } else if (typeof cur === 'object') {
         const obj = cur as Record<string, unknown>;
-        const rawUrl = String(
-          obj.url ?? obj.fileUrl ?? obj.file_url ?? obj.downloadUrl ?? obj.download_url ?? '',
+        let rawUrl = String(
+          obj.url ??
+            obj.fileUrl ??
+            obj.file_url ??
+            obj.downloadUrl ??
+            obj.download_url ??
+            obj.directUrl ??
+            obj.signedUrl ??
+            obj.link ??
+            obj.href ??
+            obj.src ??
+            '',
         );
         const rawName = String(
-          obj.name ?? obj.fileName ?? obj.file_name ?? obj.title ?? '',
+          obj.name ??
+            obj.fileName ??
+            obj.file_name ??
+            obj.title ??
+            obj.originalFileName ??
+            obj.original_file_name ??
+            '',
         );
+
+        if (rawUrl.startsWith('/') && !rawUrl.startsWith('//')) {
+          rawUrl = `https://hotmart.com${rawUrl}`;
+        }
+
         const isPdfOrMaterial =
-          rawUrl.includes('.pdf') ||
-          rawName.includes('.pdf') ||
+          rawUrl.toLowerCase().includes('.pdf') ||
+          rawName.toLowerCase().includes('.pdf') ||
           obj.type === 'ATTACHMENT' ||
           obj.type === 'FILE' ||
-          obj.type === 'MATERIAL';
+          obj.type === 'MATERIAL' ||
+          obj.mediaType === 'DOCUMENT' ||
+          Boolean(obj.fileMembershipAttachmentId);
 
         if (isPdfOrMaterial && rawUrl.startsWith('http') && !seenUrls.has(rawUrl)) {
           seenUrls.add(rawUrl);
           const fileName = rawName.length > 0 ? rawName : 'Material.pdf';
           const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
           result.push({
-            externalAttachmentId: String(obj.id ?? `${pageId}_att_${result.length}`),
+            externalAttachmentId: String(obj.id ?? obj.fileMembershipAttachmentId ?? `${pageId}_att_${result.length}`),
             fileName,
             fileUrl: rawUrl,
             fileType: String(obj.type ?? ext),
@@ -977,6 +1000,11 @@ export async function resolveLiveHotmartLessonMedia(
     const startMs = Date.now();
     const deadline = startMs + 22000;
     while (Date.now() < deadline) {
+      const currentUrl = win.webContents.getURL();
+      if (/sso\.hotmart\.com\/login/i.test(currentUrl) && Date.now() - startMs > 3500) {
+        throw new Error('Sessão Hotmart expirada. Por favor, reconecte sua conta na aba Contas & Cofre.');
+      }
+
       if (foundMedia) {
         const media = foundMedia as MediaDescriptor;
         const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
@@ -1065,6 +1093,65 @@ export async function resolveLiveHotmartLessonMedia(
   } finally {
     interceptor.detach();
     webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, null);
+    if (!win.isDestroyed()) win.close();
+  }
+}
+
+export async function resolveLiveHotmartLessonAttachments(
+  partitionName: string,
+  lessonExternalId: string,
+  courseExternalId?: string,
+): Promise<RemoteAttachmentNode[]> {
+  let targetUrl = lessonExternalId;
+  const legacyMatch = lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i);
+  if (legacyMatch && courseExternalId && /^\d+$/.test(courseExternalId)) {
+    const clubUrl = await resolveNumericCourseUrl(partitionName, courseExternalId);
+    const clubProductBase = extractClubProductBase(clubUrl);
+    if (clubProductBase) {
+      targetUrl = `${clubProductBase}/content/${legacyMatch[1]}`;
+    }
+  }
+
+  const { win } = createHiddenSessionWindow(partitionName);
+  const interceptor = attachJsonInterceptor(win, /hotmart\.com|cloudfront|amazonaws/i);
+
+  try {
+    await safeLoadUrl(win, targetUrl);
+
+    const startMs = Date.now();
+    const deadline = startMs + 10000;
+    while (Date.now() < deadline) {
+      const currentUrl = win.webContents.getURL();
+      if (/sso\.hotmart\.com\/login/i.test(currentUrl) && Date.now() - startMs > 3500) {
+        throw new Error('Sessão Hotmart expirada. Por favor, reconecte sua conta na aba Contas & Cofre.');
+      }
+
+      await win.webContents
+        .executeJavaScript(
+          `(() => {
+            const els = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span, li'));
+            const matTab = els.find(el => {
+              const t = (el.textContent || '').trim();
+              return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 2;
+            });
+            if (matTab) {
+              try { matTab.click(); } catch(e) {}
+            }
+          })()`,
+          true,
+        )
+        .catch(() => {});
+
+      const atts = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+      if (atts.length > 0) {
+        return atts;
+      }
+      await new Promise((r) => setTimeout(r, 600));
+    }
+
+    return await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+  } finally {
+    interceptor.detach();
     if (!win.isDestroyed()) win.close();
   }
 }

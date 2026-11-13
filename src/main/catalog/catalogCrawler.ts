@@ -135,5 +135,59 @@ export class CatalogCrawler {
     this.db.upsertCourseTree(courseId, mapped);
     return this.db.getCourseTreeDetails(courseId)!;
   }
+
+  async scanLessonAttachments(courseId: string, lessonId: string): Promise<LessonAttachmentRecord[]> {
+    const ctx = this.db.getLessonContext(lessonId);
+    if (!ctx) throw new Error('Lesson not found');
+    const account = this.db.getAccount(ctx.course.accountId);
+    const session = account ? this.auth.getDecryptedSession(account.id) : null;
+    if (!account || !session) throw new Error('Sessão indisponível');
+
+    const adapter = this.adapters.get(account.platform);
+    if (!adapter.resolveLessonAttachments) return this.db.getLessonAttachments(lessonId);
+
+    const nodes = await adapter.resolveLessonAttachments(
+      session,
+      ctx.course.externalCourseId,
+      ctx.lesson.externalLessonId,
+    );
+
+    for (const node of nodes) {
+      const attId = `att_${crypto.randomUUID().slice(0, 8)}`;
+      this.db.upsertLessonAttachment({
+        id: attId,
+        lessonId,
+        externalAttachmentId: node.externalAttachmentId,
+        fileName: node.fileName,
+        fileUrl: node.fileUrl,
+        fileType: node.fileType,
+        fileSize: node.fileSize ?? null,
+        localFilePath: null,
+      });
+    }
+
+    if (nodes.length > 0 && ctx.lesson.availabilityStatus === 'NO_VIDEO') {
+      this.db.setLessonAvailability(lessonId, 'AVAILABLE');
+    }
+
+    return this.db.getLessonAttachments(lessonId);
+  }
+
+  async scanModuleAttachments(courseId: string, moduleId: string): Promise<{ totalFound: number }> {
+    const tree = this.db.getCourseTreeDetails(courseId);
+    const mod = tree?.modules.find((m) => m.id === moduleId);
+    if (!mod) return { totalFound: 0 };
+
+    let totalFound = 0;
+    for (const lesson of mod.lessons) {
+      try {
+        const atts = await this.scanLessonAttachments(courseId, lesson.id);
+        totalFound += atts.length;
+      } catch {
+        // Continue scanning next lesson
+      }
+    }
+    return { totalFound };
+  }
 }
 

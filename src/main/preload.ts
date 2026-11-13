@@ -28,6 +28,10 @@ const bridge: NanoElectronBridge = {
     getOffline: () => ipcRenderer.invoke('catalog:getOffline'),
     getCourseDetails: (courseId: string, forceRemote?: boolean) =>
       ipcRenderer.invoke('course:getDetails', courseId, forceRemote),
+    scanLessonAttachments: (courseId: string, lessonId: string) =>
+      ipcRenderer.invoke('catalog:scanLessonAttachments', courseId, lessonId),
+    scanModuleAttachments: (courseId: string, moduleId: string) =>
+      ipcRenderer.invoke('catalog:scanModuleAttachments', courseId, moduleId),
   },
   queue: {
     listJobs: () => ipcRenderer.invoke('queue:listJobs'),
@@ -45,6 +49,8 @@ const bridge: NanoElectronBridge = {
   attachments: {
     openAttachment: (attachmentId: string) =>
       ipcRenderer.invoke('attachments:open', attachmentId),
+    downloadAttachment: (attachmentId: string) =>
+      ipcRenderer.invoke('attachments:download', attachmentId),
   },
   player: {
     openLesson: (lessonId: string) => ipcRenderer.invoke('player:openLesson', lessonId),

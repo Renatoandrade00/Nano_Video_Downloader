@@ -43,6 +43,20 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return deps.catalog.getCourseDetails(courseId, forceRemote);
   });
 
+  ipcMain.handle(
+    'catalog:scanLessonAttachments',
+    async (_event, courseId: string, lessonId: string) => {
+      return deps.catalog.scanLessonAttachments(courseId, lessonId);
+    },
+  );
+
+  ipcMain.handle(
+    'catalog:scanModuleAttachments',
+    async (_event, courseId: string, moduleId: string) => {
+      return deps.catalog.scanModuleAttachments(courseId, moduleId);
+    },
+  );
+
   ipcMain.handle('queue:listJobs', () => deps.queue.listJobs());
 
   ipcMain.handle(
@@ -72,6 +86,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     }
     await shell.openPath(att.localFilePath);
     return { ok: true, path: att.localFilePath };
+  });
+
+  ipcMain.handle('attachments:download', async (_event, attachmentId: string) => {
+    return deps.queue.downloadAttachment(attachmentId);
   });
 
   ipcMain.handle(

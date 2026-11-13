@@ -1,6 +1,7 @@
 import {
   fetchLiveHotmartCatalog,
   fetchLiveHotmartPurchases,
+  resolveLiveHotmartLessonAttachments,
   resolveLiveHotmartLessonMedia,
 } from './hotmartLiveSession';
 import {
@@ -300,6 +301,21 @@ export class HotmartAdapter implements IPlatformAdapter {
       headers: buildAuthHeaders(session),
       directContentLength: payload.contentLength,
     };
+  }
+
+  async resolveLessonAttachments(
+    session: DecryptedSession,
+    courseExternalId: string,
+    lessonExternalId: string,
+  ) {
+    if (this.shouldUseLiveElectronSession(session) && session.partitionName) {
+      return resolveLiveHotmartLessonAttachments(
+        session.partitionName,
+        lessonExternalId,
+        courseExternalId,
+      );
+    }
+    return [];
   }
 }
 
