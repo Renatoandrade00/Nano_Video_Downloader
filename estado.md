@@ -122,15 +122,20 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
    - Descoberta e implementação da **API REST Direta da Hotmart Club**:
      - `GET https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v1/pages/{LESSON_HASH}/complementary-content`
      - Headers: `Authorization: Bearer {token}`, `x-product-id: {productId}`.
-     - Retorna a lista de materiais em menos de 200ms por aula, sem a necessidade de instanciar janelas ocultas do Chromium.
+     - Retorna a lista de materiais em menos de 200ms por aula, sem a necessidade de instanciar janelas Chromium DOM.
    - **Fluxo de 3 Etapas para Download de PDFs com Watermark Forense:**
      1. Chamada a `rest/v3/attachment/{fileMembershipId}/download` com `x-product-id` e `Bearer {token}`, obtendo `{ lambdaUrl, token }`.
      2. Chamada ao Lambda com o cabeçalho HTTP `token: {token}`, que gera a URL assinada pelo CloudFront (`https://drm-protection-files.cb.hotmart.com/output/...`).
      3. Download do binário PDF a partir da CloudFront Signed URL (removendo headers de `Authorization` para não causar rejeição pelo S3).
+   - **Recuperação e Renovação Automática do Bearer Token OIDC:**
+     - O token OIDC JWT reside no `localStorage` sob a chave `oidc.user:...` na origem `https://hotmart.com`.
+     - Implementada a função `resolveLiveHotmartAccessToken(partitionName)` no `hotmartLiveSession.ts`.
+     - No `queueManager.ts`, tanto na ausência de token quanto na ocorrência de respostas `401` ou `403 Forbidden`, o sistema aciona silenciosamente a partição persistente da sessão para extrair o novo token, regrava o `SecretStore` com criptografia e reexecuta o download de imediato.
+     - Validação prática concluída com download e gravação íntegra de `MFN Principios fundamentais CF e CESP 2026.pdf` (828 KB) e `ICP 04 CF DUDH PSJCR 2025_art 5 parte 1.pdf` (878 KB).
    - **Tratamento de Exceções na UI:**
-     - A função `enqueueIds` do catálogo agora possui bloco `try / catch`, exibindo feedback visual em tempo real no painel caso ocorra qualquer rejeição ou expiração de sessão.
-   - **Atualização do Lançador Windows (`Abrir Nano Video Downloader.bat`):**
-     - O script `.bat` agora roda `pnpm run build` automaticamente antes da inicialização, garantindo que qualquer alteração de código ou correção seja imediatamente aplicada no Electron.
+     - A função `enqueueIds` do catálogo exibe feedback em tempo real no painel de status caso ocorra qualquer rejeição, aulas sem arquivos ou expiração.
+   - **Estabilidade do Lançador Windows (`Abrir Nano Video Downloader.bat`):**
+     - O script `.bat` configura o `PATH` do sistema com Node/NVM e inicia diretamente o executável Electron (`node_modules\electron\dist\electron.exe .`), garantindo abertura instantânea mesmo sem compilação prévia pelo usuário.
 
 ---
 

@@ -170,6 +170,37 @@ export async function openIsolatedWebBridgeLogin(
           }
         }
 
+        if (!bearerToken && config.platform === 'hotmart') {
+          try {
+            const probeWin = new BrowserWindow({
+              show: false,
+              webPreferences: { partition: partitionName, sandbox: true },
+            });
+            await probeWin.loadURL('https://hotmart.com');
+            const token = (await probeWin.webContents.executeJavaScript(
+              `(() => {
+                for (let i = 0; i < window.localStorage.length; i++) {
+                  const k = window.localStorage.key(i) || '';
+                  if (k.startsWith('oidc.user:')) {
+                    try {
+                      const item = JSON.parse(window.localStorage.getItem(k) || '{}');
+                      if (item && item.access_token) return item.access_token;
+                    } catch {}
+                  }
+                }
+                return null;
+              })()`,
+              true,
+            )) as string | null;
+            if (token) {
+              bearerToken = token.replace(/^Bearer\s+/i, '');
+            }
+            if (!probeWin.isDestroyed()) probeWin.close();
+          } catch {
+            // Hotmart localStorage probe best-effort
+          }
+        }
+
         if (relevantCookies.length === 0 && !bearerToken) {
           return;
         }

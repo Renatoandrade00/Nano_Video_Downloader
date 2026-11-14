@@ -158,17 +158,56 @@ export class QueueAndChunkManager {
       // Se a URL for um endpoint nativo de anexo da Hotmart (/rest/v3/attachment/{id}/download)
       if (downloadUrl.includes('/rest/v3/attachment/')) {
         const productId = ctx.course.externalCourseId;
-        const authHeader = session?.bearerToken ? `Bearer ${session.bearerToken}` : '';
-        const initRes = await this.config.fetchFn(downloadUrl, {
+        let token = session?.bearerToken;
+        if (!token && session?.partitionName) {
+          try {
+            const { resolveLiveHotmartAccessToken } = await import('../adapters/hotmartLiveSession');
+            const resolved = await resolveLiveHotmartAccessToken(session.partitionName);
+            if (resolved) {
+              token = resolved;
+              session.bearerToken = token;
+              this.secrets.encryptJson(ctx.account.credentialRef, session);
+            }
+          } catch {
+            // Ignore partition resolution error
+          }
+        }
+
+        let initRes = await this.config.fetchFn(downloadUrl, {
           method: 'GET',
           headers: {
             ...headers,
-            ...(authHeader ? { Authorization: authHeader } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(productId ? { 'x-product-id': String(productId) } : {}),
             Origin: 'https://hotmart.com',
             Referer: 'https://hotmart.com/',
           },
         });
+
+        // Se o token estiver expirado ou inválido (401/403), tenta atualizar a partir da partição
+        if ((initRes.status === 401 || initRes.status === 403) && session?.partitionName) {
+          try {
+            const { resolveLiveHotmartAccessToken } = await import('../adapters/hotmartLiveSession');
+            const refreshed = await resolveLiveHotmartAccessToken(session.partitionName);
+            if (refreshed && refreshed !== token) {
+              token = refreshed;
+              session.bearerToken = token;
+              this.secrets.encryptJson(ctx.account.credentialRef, session);
+              initRes = await this.config.fetchFn(downloadUrl, {
+                method: 'GET',
+                headers: {
+                  ...headers,
+                  Authorization: `Bearer ${token}`,
+                  ...(productId ? { 'x-product-id': String(productId) } : {}),
+                  Origin: 'https://hotmart.com',
+                  Referer: 'https://hotmart.com/',
+                },
+              });
+            }
+          } catch {
+            // Ignore retry error
+          }
+        }
 
         if (!initRes.ok) {
           throw new Error(`HTTP ${initRes.status} ao solicitar download do anexo: ${att.fileName}`);

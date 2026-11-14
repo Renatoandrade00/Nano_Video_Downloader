@@ -1249,6 +1249,49 @@ export async function resolveLiveHotmartLessonMedia(
   }
 }
 
+export async function resolveLiveHotmartAccessToken(partitionName: string): Promise<string | null> {
+  try {
+    const electron = getElectron();
+    if (!electron || !electron.BrowserWindow) return null;
+
+    const { win } = createHiddenSessionWindow(partitionName);
+    try {
+      await safeLoadUrl(win, 'https://hotmart.com');
+      const token = (await win.webContents.executeJavaScript(
+        `(() => {
+          try {
+            for (let i = 0; i < window.localStorage.length; i++) {
+              const k = window.localStorage.key(i) || '';
+              if (k.startsWith('oidc.user:')) {
+                const item = JSON.parse(window.localStorage.getItem(k) || '{}');
+                if (item && item.access_token) return item.access_token;
+              }
+            }
+          } catch {}
+          return null;
+        })()`,
+        true,
+      )) as string | null;
+
+      if (token) {
+        writeSyncDebugLog({
+          event: 'resolveLiveHotmartAccessTokenSuccess',
+          tokenLength: token.length,
+        });
+        return token;
+      }
+    } finally {
+      if (!win.isDestroyed()) win.close();
+    }
+  } catch (err) {
+    writeSyncDebugLog({
+      event: 'resolveLiveHotmartAccessTokenError',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return null;
+}
+
 export async function resolveLiveHotmartLessonAttachments(
   partitionName: string,
   lessonExternalId: string,
@@ -1260,13 +1303,18 @@ export async function resolveLiveHotmartLessonAttachments(
     lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i)?.[1] ||
     lessonExternalId;
 
+  let activeToken = bearerToken;
+  if (!activeToken && partitionName) {
+    activeToken = await resolveLiveHotmartAccessToken(partitionName);
+  }
+
   // 1. Tentar chamada direta via API REST nativa da Hotmart Club
-  if (bearerToken && courseExternalId && /^[a-zA-Z0-9]+$/.test(lessonHash)) {
+  if (activeToken && courseExternalId && /^[a-zA-Z0-9]+$/.test(lessonHash)) {
     try {
       const apiUrl = `https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v1/pages/${lessonHash}/complementary-content`;
       const res = await fetch(apiUrl, {
         headers: {
-          Authorization: `Bearer ${bearerToken}`,
+          Authorization: `Bearer ${activeToken}`,
           'x-product-id': String(courseExternalId),
           Origin: 'https://hotmart.com',
           Referer: 'https://hotmart.com/',
