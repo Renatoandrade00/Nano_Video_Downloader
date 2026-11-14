@@ -82,13 +82,26 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
 4. **Tratamento de Endpoints Assinados:** Se a URL do anexo for um endpoint de metadados (`/download-url`), o motor de download resolve automaticamente a URL assinada final e grava o arquivo com verificação de integridade.
 5. **Transparência de Sessão:** O crawler não mascara mais erros de autenticação. Se a sessão SSO da Hotmart expirar, o usuário é notificado diretamente para revalidar a conta em *Contas & Cofre*.
 
-### Fase 5: Ferramental de Diagnóstico e Inspeção com Playwright
-*Esta fase adicionou o Playwright como ferramenta de diagnóstico profundo e engenharia reversa para inspecionar com precisão a estrutura de entrega de PDFs no Hotmart Club.*
+### Fase 5: Descobertas Cruciais com Playwright e Engenharia Reversa da Hotmart
+*A inspeção com Playwright interativo de 4 minutos permitiu desvendar 100% da arquitetura interna de entrega de conteúdo da Hotmart Club:*
 
-1. **Instalação e Ambiente:** Adição do `playwright` às devDependencies e download dos binários Chromium independentes.
-2. **Script de Inspeção (`scripts/inspect_playwright.mjs`):** Script dedicado configurado com 4 minutos de navegação livre contínua em janela maximizada. Enquanto o usuário navega, o Playwright intercepta em tempo real todas as requisições de rede, APIs de materiais, downloads e cliques na aba `Materiais 1`.
-3. **Inicializador Interativo Desktop (`inspecionar_com_playwright.bat`):** Criado para contornar a limitação de subprocessos em background no Windows. Permite execução direta na área de trabalho com 1 clique.
-4. **Mapeamento Exato de Aulas com PDF:** Confirmação no banco de dados local (`library.db`) de que a Aula 01 (`r48l2oEn4R`) não possui materiais anexados, enquanto a Aula 02 (`o4EWn8BR7z` - *EDC02 - Art. 5º da CF/88...*) possui o anexo `ICP 04 CF DUDH PSJCR 2025_art 5 parte 1.pdf`.
+1. **Endpoint Nativo de Materiais de Apoio (PDFs):**
+   - URL: `GET https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v1/pages/{LESSON_HASH}/complementary-content`
+   - Retorno: lista estruturada de `attachments` com `fileOrder`, `fileMembershipId`, `fileName` e `fileSize`.
+   - Endpoint de Download Direto: `GET https://api-club-hot-club-api.cb.hotmart.com/rest/v3/attachment/{fileMembershipId}/download`.
+   - PDFs capturados e validados com sucesso no disco:
+     - `ICP 04 CF DUDH PSJCR 2025_art 5 parte 1.pdf` (878 KB)
+     - `MAT01 - As 4 operações com inteiros.pdf` (140 KB)
+     - `MAT02 - Fatoração e radiciação.pdf` (192 KB)
+     - `GM00 - Classes de Palavras - gramática.pdf` (1.45 MB)
+
+2. **Descoberta de Aulas Multi-Vídeo (Ex: Matemática `EMAT01` com 3 partes):**
+   - No endpoint `GET https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v2/web/lessons/{LESSON_HASH}`, o campo `medias` é um array contendo todas as mídias da aula.
+   - Exemplo real em `EMAT01`:
+     - Parte 1: `AULA 1 PT1.mov` (`WLalddzyqk`, 972s)
+     - Parte 2: `AULA 1 PT2.mov` (`2qYvKKbOLB`, 826s)
+     - Parte 3: `Aula 1 PT 3_11NOV.mp4` (`4qXXgaWpqv`, 1122s)
+   - *Ação necessária:* Atualizar a árvore de módulos e a fila de downloads para suportar múltiplas mídias por aula, gerando arquivos separados (`{Aula} — Parte 1.mp4`, `{Aula} — Parte 2.mp4`, etc.) para garantir o download integral de todas as partes.
 
 ---
 
