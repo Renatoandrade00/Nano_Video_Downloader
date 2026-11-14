@@ -189,26 +189,30 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
       setStatusMsg('Selecione ao menos uma opção: Vídeos ou Arquivos/PDFs.');
       return;
     }
-    setStatusMsg(null);
-    const res = await window.antigravity.queue.enqueue(lessonIds, resolution, {
-      downloadVideos,
-      downloadAttachments,
-    });
-    const parts: string[] = [];
-    if (res.enqueuedJobIds.length > 0) {
-      parts.push(`${res.enqueuedJobIds.length} vídeo(s)`);
-    }
-    if ((res.enqueuedAttachmentCount ?? 0) > 0) {
-      parts.push(`${res.enqueuedAttachmentCount} arquivo(s) de apoio`);
-    }
-    if (parts.length > 0) {
-      setStatusMsg(
-        `${parts.join(' e ')} enfileirado(s).${res.rejected.length > 0 ? ` (${res.rejected.length} rejeitada(s))` : ''}`,
-      );
-      setSelectedLessonIds(new Set());
-      onEnqueued();
-    } else if (res.rejected.length > 0) {
-      setStatusMsg(`Nenhum item enfileirado: ${res.rejected[0].reason}`);
+    setStatusMsg('Enfileirando itens para download...');
+    try {
+      const res = await window.antigravity.queue.enqueue(lessonIds, resolution, {
+        downloadVideos,
+        downloadAttachments,
+      });
+      const parts: string[] = [];
+      if (res.enqueuedJobIds.length > 0) {
+        parts.push(`${res.enqueuedJobIds.length} vídeo(s)`);
+      }
+      if ((res.enqueuedAttachmentCount ?? 0) > 0) {
+        parts.push(`${res.enqueuedAttachmentCount} arquivo(s) de apoio`);
+      }
+      if (parts.length > 0) {
+        setStatusMsg(
+          `${parts.join(' e ')} enfileirado(s).${res.rejected.length > 0 ? ` (${res.rejected.length} rejeitada(s))` : ''}`,
+        );
+        setSelectedLessonIds(new Set());
+        onEnqueued();
+      } else if (res.rejected.length > 0) {
+        setStatusMsg(`Nenhum item enfileirado: ${res.rejected[0].reason}`);
+      }
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Falha ao enfileirar selecionadas.');
     }
   };
 

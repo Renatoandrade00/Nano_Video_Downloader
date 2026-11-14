@@ -154,9 +154,65 @@ export class QueueAndChunkManager {
         : {};
 
       let downloadUrl = att.fileUrl;
+
+      // Se a URL for um endpoint nativo de anexo da Hotmart (/rest/v3/attachment/{id}/download)
+      if (downloadUrl.includes('/rest/v3/attachment/')) {
+        const productId = ctx.course.externalCourseId;
+        const authHeader = session?.bearerToken ? `Bearer ${session.bearerToken}` : '';
+        const initRes = await this.config.fetchFn(downloadUrl, {
+          method: 'GET',
+          headers: {
+            ...headers,
+            ...(authHeader ? { Authorization: authHeader } : {}),
+            ...(productId ? { 'x-product-id': String(productId) } : {}),
+            Origin: 'https://hotmart.com',
+            Referer: 'https://hotmart.com/',
+          },
+        });
+
+        if (!initRes.ok) {
+          throw new Error(`HTTP ${initRes.status} ao solicitar download do anexo: ${att.fileName}`);
+        }
+
+        const initJson = (await initRes.json()) as {
+          lambdaUrl?: string;
+          token?: string;
+          url?: string;
+          downloadUrl?: string;
+        };
+
+        if (initJson.lambdaUrl && initJson.token) {
+          // Hotmart Social DRM lambda endpoint: passar o token via header 'token'
+          const lambdaRes = await this.config.fetchFn(initJson.lambdaUrl, {
+            method: 'GET',
+            headers: {
+              token: initJson.token,
+              Origin: 'https://hotmart.com',
+              Referer: 'https://hotmart.com/',
+            },
+          });
+
+          if (!lambdaRes.ok) {
+            throw new Error(`HTTP ${lambdaRes.status} no gerador de DRM do anexo`);
+          }
+
+          const signedUrl = (await lambdaRes.text()).trim();
+          if (!signedUrl.startsWith('http')) {
+            throw new Error(`URL assinada inválida retornada pelo gerador de DRM`);
+          }
+          downloadUrl = signedUrl;
+        } else {
+          const direct = String(initJson.url ?? initJson.downloadUrl ?? '');
+          if (direct.startsWith('http')) {
+            downloadUrl = direct;
+          }
+        }
+      }
+
+      const isSignedStorage = /Signature=|X-Amz-Signature=|Key-Pair-Id=/i.test(downloadUrl);
       let res = await this.config.fetchFn(downloadUrl, {
         method: 'GET',
-        headers,
+        headers: isSignedStorage ? {} : headers,
       });
 
       // Se a resposta for um JSON com a URL assinada real do arquivo (padrão Hotmart Club API)

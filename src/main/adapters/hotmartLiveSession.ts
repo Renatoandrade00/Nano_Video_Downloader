@@ -1253,7 +1253,66 @@ export async function resolveLiveHotmartLessonAttachments(
   partitionName: string,
   lessonExternalId: string,
   courseExternalId?: string,
+  bearerToken?: string | null,
 ): Promise<RemoteAttachmentNode[]> {
+  const lessonHash =
+    lessonExternalId.match(/content\/([^/?#]+)/)?.[1] ||
+    lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i)?.[1] ||
+    lessonExternalId;
+
+  // 1. Tentar chamada direta via API REST nativa da Hotmart Club
+  if (bearerToken && courseExternalId && /^[a-zA-Z0-9]+$/.test(lessonHash)) {
+    try {
+      const apiUrl = `https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v1/pages/${lessonHash}/complementary-content`;
+      const res = await fetch(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${bearerToken}`,
+          'x-product-id': String(courseExternalId),
+          Origin: 'https://hotmart.com',
+          Referer: 'https://hotmart.com/',
+        },
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          attachments?: Array<{
+            fileOrder?: number;
+            fileMembershipId?: string;
+            fileName?: string;
+            fileSize?: number;
+          }>;
+        };
+
+        if (Array.isArray(data.attachments)) {
+          writeSyncDebugLog({
+            event: 'resolveLiveHotmartLessonAttachmentsDirectApiSuccess',
+            lessonHash,
+            count: data.attachments.length,
+          });
+
+          return data.attachments.map((att, idx) => {
+            const attId = att.fileMembershipId || `att_${idx}`;
+            const fileName = att.fileName || 'Material.pdf';
+            const ext = fileName.includes('.') ? fileName.split('.').pop()! : 'pdf';
+            return {
+              externalAttachmentId: attId,
+              fileName,
+              fileUrl: `https://api-club-hot-club-api.cb.hotmart.com/rest/v3/attachment/${attId}/download`,
+              fileType: ext,
+              fileSize: att.fileSize,
+            };
+          });
+        }
+      }
+    } catch (err) {
+      writeSyncDebugLog({
+        event: 'resolveLiveHotmartLessonAttachmentsDirectApiError',
+        lessonHash,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   let targetUrl = lessonExternalId;
   const legacyMatch = lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i);
   if (legacyMatch && courseExternalId && /^\d+$/.test(courseExternalId)) {

@@ -37,6 +37,7 @@ export class OwnershipVerifier {
     if (!course) {
       return { authorized: false, reason: 'COURSE_NOT_FOUND' };
     }
+
     const account = this.db.getAccount(course.accountId);
     if (!account || account.status === 'DISCONNECTED') {
       return { authorized: false, reason: 'ACCOUNT_DISCONNECTED' };
@@ -48,23 +49,35 @@ export class OwnershipVerifier {
     }
 
     const adapter = this.adapters.get(account.platform);
-    const result = await adapter.verifyCourseOwnership(session, course.externalCourseId);
+    try {
+      const result = await adapter.verifyCourseOwnership(session, course.externalCourseId);
 
-    this.db.updateCourseLicense(course.id, result.normalizedStatus, result.checkedAt);
-    this.db.updateAccountStatus(account.id, 'CONNECTED', result.checkedAt);
+      this.db.updateCourseLicense(course.id, result.normalizedStatus, result.checkedAt);
+      this.db.updateAccountStatus(account.id, 'CONNECTED', result.checkedAt);
 
-    if (result.normalizedStatus !== 'AUTHORIZED') {
-      this.revokeCourseDownloads(course.id, result.rawStatus);
+      if (result.normalizedStatus !== 'AUTHORIZED') {
+        this.revokeCourseDownloads(course.id, result.rawStatus);
+        return {
+          authorized: false,
+          reason: `LICENSE_${result.rawStatus}`,
+        };
+      }
+
       return {
-        authorized: false,
-        reason: `LICENSE_${result.rawStatus}`,
+        authorized: true,
+        purchaseRef: result.purchaseRef,
       };
+    } catch (err) {
+      // Se a verificação remota falhou (ex: timeout de rede ou offline),
+      // mas o curso já estava AUTORIZADO no banco local, mantém o acesso para não travar a aplicação offline
+      if (course.licenseStatus === 'AUTHORIZED') {
+        return {
+          authorized: true,
+          purchaseRef: course.externalCourseId,
+        };
+      }
+      throw err;
     }
-
-    return {
-      authorized: true,
-      purchaseRef: result.purchaseRef,
-    };
   }
 
   revokeCourseDownloads(courseId: string, reason: string): string[] {

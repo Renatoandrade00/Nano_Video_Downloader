@@ -119,10 +119,18 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
      - Todas as partes recebem a marca d'água forense e são salvas na pasta correta do módulo.
 
 2. **Extração e Download Robusto de Materiais PDF:**
-   - Mapeamento direto de `fileMembershipId` nos metadados de anexos.
-   - Integração com o endpoint nativo `https://api-club-hot-club-api.cb.hotmart.com/rest/v3/attachment/{fileMembershipId}/download`.
-   - Remoção programática de modais e banners de consentimento de cookies ("Este site utiliza cookies") e rolagem automática (`window.scrollBy`) antes de simular cliques na aba *Materiais*.
-   - Script de auxílio e sincronização de sessão via Playwright (`scripts/inspect_playwright.mjs` e `inspecionar_com_playwright.bat`), permitindo login interativo com janela visível caso a sessão do usuário expire.
+   - Descoberta e implementação da **API REST Direta da Hotmart Club**:
+     - `GET https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v1/pages/{LESSON_HASH}/complementary-content`
+     - Headers: `Authorization: Bearer {token}`, `x-product-id: {productId}`.
+     - Retorna a lista de materiais em menos de 200ms por aula, sem a necessidade de instanciar janelas ocultas do Chromium.
+   - **Fluxo de 3 Etapas para Download de PDFs com Watermark Forense:**
+     1. Chamada a `rest/v3/attachment/{fileMembershipId}/download` com `x-product-id` e `Bearer {token}`, obtendo `{ lambdaUrl, token }`.
+     2. Chamada ao Lambda com o cabeçalho HTTP `token: {token}`, que gera a URL assinada pelo CloudFront (`https://drm-protection-files.cb.hotmart.com/output/...`).
+     3. Download do binário PDF a partir da CloudFront Signed URL (removendo headers de `Authorization` para não causar rejeição pelo S3).
+   - **Tratamento de Exceções na UI:**
+     - A função `enqueueIds` do catálogo agora possui bloco `try / catch`, exibindo feedback visual em tempo real no painel caso ocorra qualquer rejeição ou expiração de sessão.
+   - **Atualização do Lançador Windows (`Abrir Nano Video Downloader.bat`):**
+     - O script `.bat` agora roda `pnpm run build` automaticamente antes da inicialização, garantindo que qualquer alteração de código ou correção seja imediatamente aplicada no Electron.
 
 ---
 
