@@ -86,8 +86,8 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
 *Esta fase adicionou o Playwright como ferramenta de diagnóstico profundo e engenharia reversa para inspecionar com precisão a estrutura de entrega de PDFs no Hotmart Club.*
 
 1. **Instalação e Ambiente:** Adição do `playwright` às devDependencies e download dos binários Chromium independentes.
-2. **Script de Inspeção (`scripts/inspect_playwright.mjs`):** Script dedicado que monitora a navegação, captura todas as respostas JSON da API (`/rest/public/v1/...`), clica na aba `Materiais 1`, localiza cards de PDF e intercepta o evento de download do arquivo.
-3. **Inicializador Interativo Desktop (`inspecionar_com_playwright.bat`):** Criado para contornar a limitação de subprocessos em background no Windows (onde processos filhos em subshell podem não ser exibidos na sessão gráfica do usuário). Ajustado para codificação ASCII pura e sem acentos para evitar interpretação de comandos espúrios pelo interpretador `cmd.exe` do Windows.
+2. **Script de Inspeção (`scripts/inspect_playwright.mjs`):** Script dedicado configurado com 4 minutos de navegação livre contínua em janela maximizada. Enquanto o usuário navega, o Playwright intercepta em tempo real todas as requisições de rede, APIs de materiais, downloads e cliques na aba `Materiais 1`.
+3. **Inicializador Interativo Desktop (`inspecionar_com_playwright.bat`):** Criado para contornar a limitação de subprocessos em background no Windows. Permite execução direta na área de trabalho com 1 clique.
 4. **Mapeamento Exato de Aulas com PDF:** Confirmação no banco de dados local (`library.db`) de que a Aula 01 (`r48l2oEn4R`) não possui materiais anexados, enquanto a Aula 02 (`o4EWn8BR7z` - *EDC02 - Art. 5º da CF/88...*) possui o anexo `ICP 04 CF DUDH PSJCR 2025_art 5 parte 1.pdf`.
 
 ---
