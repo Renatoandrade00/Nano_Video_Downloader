@@ -221,6 +221,36 @@ export interface GoogleDriveSyncEvent {
   error?: string;
 }
 
+export interface ModuleSyncAudit {
+  moduleId: string;
+  moduleTitle: string;
+  orderIndex: number;
+  totalLessons: number;
+  syncedLessons: number;
+  pendingLessons: number;
+  totalAttachments: number;
+  syncedAttachments: number;
+  pendingAttachments: number;
+  isFullySynced: boolean;
+}
+
+export interface CourseSyncAuditResult {
+  courseId: string;
+  courseTitle: string;
+  storagePath: string;
+  driveFolderUrl?: string;
+  totalLessons: number;
+  syncedLessons: number;
+  pendingLessons: number;
+  totalAttachments: number;
+  syncedAttachments: number;
+  pendingAttachments: number;
+  overallPercent: number;
+  pendingLessonIds: string[];
+  pendingAttachmentIds: string[];
+  modules: ModuleSyncAudit[];
+}
+
 export interface AppSettings {
   libraryRootDir: string;
   bandwidthLimitBytesPerSec: number | null;
@@ -242,6 +272,12 @@ export interface NanoElectronBridge {
     getCourseDetails(courseId: string, forceRemote?: boolean): Promise<CourseTreeDetails>;
     scanLessonAttachments(courseId: string, lessonId: string): Promise<LessonAttachmentRecord[]>;
     scanModuleAttachments(courseId: string, moduleId: string): Promise<{ totalFound: number }>;
+    auditCourseSync(courseId: string): Promise<CourseSyncAuditResult>;
+    downloadPending(
+      courseId: string,
+      resolution: ResolutionOption,
+      options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+    ): Promise<{ enqueuedLessons: number; enqueuedAttachments: number; rejectedCount: number }>;
   };
   queue: {
     listJobs(): Promise<DownloadJobRecord[]>;

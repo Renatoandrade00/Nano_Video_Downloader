@@ -149,6 +149,15 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
   - Resolução automática e silenciosa de tokens OIDC da partição, eliminando o erro HTTP 403.
   - Sincronização offline-first e biblioteca local com marca d'água forense.
 
+### Fase 5: Identidade Nano S Tecnologia, Google Drive e Sincronização Inteligente em 1-Clique
+- **Identidade e Branding:** Substituição de referências residuais para a marca oficial **Nano S Tecnologia**.
+- **Integração Google Drive:** Suporte à pasta remota/compartilhada via Google Drive Desktop (`G:\Meu Drive`), integração via Webhook/Apps Script e modos de armazenamento `local`, `gdrive` e `both`.
+- **Motor de Auditoria e Comparação Inteligente (`CourseSyncAuditor`):**
+  - Leitura e varredura recursiva da pasta do curso na Biblioteca local e no Google Drive.
+  - Reconciliação com as 372 aulas e 80 PDFs do banco de dados SQLite.
+  - Identificação precisa de quais arquivos já existem e quais estão pendentes.
+  - Botão na interface **"Baixar Tudo Pendente" / "Sincronizar Tudo"** com 1 clique, enfileirando exclusivamente os itens que faltam, eliminando retrabalho e consumo desnecessário de banda.
+
 ---
 
 ## 4. Matriz de Estado dos Componentes
@@ -157,11 +166,13 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
 |---|---|---|---|
 | **Cofre & Chaves** | `src/main/vault/secretStore.ts` | ✅ Estável | Criptografia DPAPI nativa com chaves de 32 bytes |
 | **Banco de Dados** | `src/main/vault/database.ts` | ✅ Estável | SQLite nativo (`node:sqlite`) com reconciliação de disco |
+| **Auditoria & Sincronização** | `src/main/storage/courseSyncAuditor.ts` | ✅ Estável | Varredura e comparação em 1 clique (pendentes vs salvos) |
+| **Google Drive Service** | `src/main/storage/googleDriveService.ts` | ✅ Estável | Suporte a pastas locais do GDrive e Webhook |
 | **Sanitizador de Paths** | `src/shared/pathSanitizer.ts` | ✅ Estável | Formatação de pastas para vídeos e materiais PDF |
 | **Fila de Downloads** | `src/main/queue/queueManager.ts` | ✅ Estável | Fila sequencial (1 por vez) para vídeos e PDFs |
 | **Live Hotmart Session**| `src/main/adapters/hotmartLiveSession.ts` | ✅ Estável | Mapeamento Club, Next.js hydration, `will-download` |
 | **WebBridge Login** | `src/main/auth/webBridge.ts` | ✅ Estável | Janela Chromium isolada com captura de sessão |
-| **Catálogo na UI** | `src/renderer/components/CatalogView.tsx` | ✅ Estável | Árvore de cursos com busca e download de PDFs |
+| **Catálogo na UI** | `src/renderer/components/CatalogView.tsx` | ✅ Estável | Painel de sincronização 1 clique, auditoria e árvore de aulas |
 | **Player de Mídia** | `src/renderer/components/OfflineLibrary.tsx` | ✅ Estável | Player HTML5 offline com carimbo d'água forense |
 
 ---

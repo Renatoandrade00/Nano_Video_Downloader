@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import {
+  CheckCircle2,
   CheckSquare,
+  Cloud,
   Download,
   FileText,
   FolderOpen,
+  HardDrive,
   Lock,
   RefreshCw,
   Search,
@@ -11,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   CourseRecord,
+  CourseSyncAuditResult,
   CourseTreeDetails,
   ResolutionOption,
 } from '../../shared/types';
@@ -49,6 +53,48 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [scanningLessonId, setScanningLessonId] = useState<string | null>(null);
   const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
   const [downloadingModulePdfsId, setDownloadingModulePdfsId] = useState<string | null>(null);
+  const [auditResult, setAuditResult] = useState<CourseSyncAuditResult | null>(null);
+  const [isAuditing, setIsAuditing] = useState<boolean>(false);
+  const [isDownloadingPending, setIsDownloadingPending] = useState<boolean>(false);
+
+  const handleAuditCourse = async (courseId?: string) => {
+    const id = courseId || selectedCourse?.course.id;
+    if (!id) return;
+    setIsAuditing(true);
+    try {
+      const result = await window.antigravity.catalog.auditCourseSync(id);
+      setAuditResult(result);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Erro ao auditar sincronização do curso.');
+    } finally {
+      setIsAuditing(false);
+    }
+  };
+
+  const handleDownloadPending = async () => {
+    if (!selectedCourse) return;
+    setIsDownloadingPending(true);
+    setStatusMsg('Enfileirando itens pendentes para download e sincronização...');
+    try {
+      const res = await window.antigravity.catalog.downloadPending(
+        selectedCourse.course.id,
+        resolution,
+        {
+          downloadVideos,
+          downloadAttachments,
+        },
+      );
+      setStatusMsg(
+        `✓ Sincronização iniciada: ${res.enqueuedLessons} aula(s) e ${res.enqueuedAttachments} PDF(s) pendentes foram adicionados à fila!`,
+      );
+      onEnqueued();
+      void handleAuditCourse(selectedCourse.course.id);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Erro ao iniciar download dos pendentes.');
+    } finally {
+      setIsDownloadingPending(false);
+    }
+  };
 
   const handleSyncCatalog = async () => {
     if (!onSync || isSyncing) return;
@@ -67,10 +113,12 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const openCourse = async (course: CourseRecord, forceRemote = false) => {
     setLoadingCourseId(course.id);
     setStatusMsg(null);
+    setAuditResult(null);
     try {
       const details = await window.antigravity.catalog.getCourseDetails(course.id, forceRemote);
       setSelectedCourse(details);
       setSelectedLessonIds(new Set());
+      void handleAuditCourse(course.id);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : 'Erro ao carregar módulos do curso.');
     } finally {
@@ -432,7 +480,164 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
             </div>
           </div>
 
+          {/* PAINEL DE AUDITORIA E SINCRONIZAÇÃO INTELIGENTE (1 CLIQUE) */}
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(16,185,129,0.08))',
+              border: '1px solid rgba(99,102,241,0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Cloud size={20} color="#6366f1" />
+                <div>
+                  <strong style={{ fontSize: 15 }}>Sincronização & Comparação com a Pasta (Drive / Local)</strong>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    Compara em 1 clique quais aulas e PDFs do curso já estão na sua pasta física e Google Drive e baixa tudo que falta.
+                  </div>
+                </div>
+              </div>
+
+              <div className="row-gap">
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                  disabled={isAuditing}
+                  onClick={() => void handleAuditCourse()}
+                  title="Ler novamente os arquivos da pasta e atualizar o comparativo"
+                >
+                  <RefreshCw size={13} className={isAuditing ? 'spin' : ''} />
+                  {isAuditing ? 'Auditando Pasta...' : 'Auditar & Comparar Pasta'}
+                </button>
+
+                {auditResult && (auditResult.pendingLessons > 0 || auditResult.pendingAttachments > 0) && (
+                  <button
+                    className="btn btn-primary"
+                    style={{
+                      fontSize: 13,
+                      padding: '7px 16px',
+                      background: '#10b981',
+                      borderColor: '#10b981',
+                      color: '#fff',
+                      fontWeight: 700,
+                    }}
+                    disabled={isDownloadingPending || !online}
+                    onClick={() => void handleDownloadPending()}
+                  >
+                    <Download size={15} />
+                    {isDownloadingPending
+                      ? 'Enfileirando...'
+                      : `Baixar Tudo Pendente (${auditResult.pendingLessons} aulas, ${auditResult.pendingAttachments} PDFs)`}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {auditResult && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                  <span style={{ fontWeight: 600 }}>
+                    Cobertura da Pasta: {auditResult.overallPercent}% Sincronizado
+                  </span>
+                  <span style={{ color: 'var(--muted)' }}>
+                    {auditResult.syncedLessons + auditResult.syncedAttachments} de{' '}
+                    {auditResult.totalLessons + auditResult.totalAttachments} itens salvos
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    width: '100%',
+                    height: 8,
+                    background: 'rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${auditResult.overallPercent}%`,
+                      height: '100%',
+                      background:
+                        auditResult.overallPercent === 100
+                          ? 'var(--success)'
+                          : 'linear-gradient(90deg, #6366f1, #10b981)',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, marginTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="badge badge-success">
+                      ✓ {auditResult.syncedLessons} / {auditResult.totalLessons} Aulas Salvas
+                    </span>
+                    {auditResult.pendingLessons > 0 && (
+                      <span
+                        className="badge"
+                        style={{
+                          background: 'rgba(245,158,11,0.15)',
+                          color: '#fbbf24',
+                          border: '1px solid rgba(245,158,11,0.3)',
+                        }}
+                      >
+                        ⚠️ {auditResult.pendingLessons} Aulas Pendentes
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="badge badge-success">
+                      ✓ {auditResult.syncedAttachments} / {auditResult.totalAttachments} PDFs Salvos
+                    </span>
+                    {auditResult.pendingAttachments > 0 && (
+                      <span
+                        className="badge"
+                        style={{
+                          background: 'rgba(245,158,11,0.15)',
+                          color: '#fbbf24',
+                          border: '1px solid rgba(245,158,11,0.3)',
+                        }}
+                      >
+                        ⚠️ {auditResult.pendingAttachments} PDFs Pendentes
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <HardDrive size={12} />
+                    <span>{auditResult.storagePath}</span>
+                  </div>
+                </div>
+
+                {auditResult.pendingLessons === 0 && auditResult.pendingAttachments === 0 && (
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 6,
+                      background: 'rgba(16,185,129,0.15)',
+                      color: '#6ee7b7',
+                      fontSize: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <CheckCircle2 size={15} />
+                    <strong>Parabéns! Este curso está 100% sincronizado com a sua pasta física e Google Drive.</strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {selectedCourse.modules.map((mod) => {
+            const modAudit = auditResult?.modules.find((m) => m.moduleId === mod.id);
             const selectableIds = mod.lessons
               .filter(isLessonSelectable)
               .map((l) => l.id);
@@ -452,7 +657,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                 }}
               >
                 <div className="row-between">
-                  <div className="row-gap">
+                  <div className="row-gap" style={{ alignItems: 'center' }}>
                     <button
                       className="btn"
                       style={{ padding: '4px 8px' }}
@@ -462,8 +667,51 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       {allModSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                       Módulo {String(mod.orderIndex).padStart(2, '0')} — {mod.title}
                     </button>
+
+                    {modAudit && (
+                      <span
+                        className={modAudit.isFullySynced ? 'badge badge-success' : 'badge'}
+                        style={{
+                          fontSize: 11,
+                          background: modAudit.isFullySynced ? undefined : 'rgba(245,158,11,0.15)',
+                          color: modAudit.isFullySynced ? undefined : '#fbbf24',
+                          border: modAudit.isFullySynced ? undefined : '1px solid rgba(245,158,11,0.3)',
+                        }}
+                      >
+                        {modAudit.isFullySynced
+                          ? '✓ Salvo na Pasta'
+                          : `${modAudit.pendingLessons} aula(s) ${
+                              modAudit.pendingAttachments > 0 ? `+ ${modAudit.pendingAttachments} PDF(s)` : ''
+                            } pendente(s)`}
+                      </span>
+                    )}
                   </div>
                   <div className="row-gap">
+                    {modAudit && !modAudit.isFullySynced && modAudit.pendingLessons > 0 && (
+                      <button
+                        className="btn btn-primary"
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 12,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          background: '#10b981',
+                          borderColor: '#10b981',
+                        }}
+                        disabled={!online}
+                        onClick={() => {
+                          const pendingInMod = mod.lessons
+                            .filter((l) => !l.localFilePath)
+                            .map((l) => l.id);
+                          if (pendingInMod.length > 0) void enqueueIds(pendingInMod);
+                        }}
+                        title="Baixar apenas as aulas deste módulo que ainda não foram salvas na pasta"
+                      >
+                        <Download size={13} />
+                        Baixar Pendentes ({modAudit.pendingLessons})
+                      </button>
+                    )}
                     <button
                       className="btn"
                       style={{

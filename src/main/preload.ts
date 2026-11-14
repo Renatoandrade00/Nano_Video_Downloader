@@ -35,6 +35,13 @@ const bridge: NanoElectronBridge = {
       ipcRenderer.invoke('catalog:scanLessonAttachments', courseId, lessonId),
     scanModuleAttachments: (courseId: string, moduleId: string) =>
       ipcRenderer.invoke('catalog:scanModuleAttachments', courseId, moduleId),
+    auditCourseSync: (courseId: string) =>
+      ipcRenderer.invoke('catalog:auditCourseSync', courseId),
+    downloadPending: (
+      courseId: string,
+      resolution: ResolutionOption,
+      options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+    ) => ipcRenderer.invoke('catalog:downloadPending', courseId, resolution, options),
   },
   queue: {
     listJobs: () => ipcRenderer.invoke('queue:listJobs'),

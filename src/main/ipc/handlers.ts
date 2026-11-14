@@ -4,6 +4,7 @@ import { AppSettings, GoogleDriveConfig, PlatformId, ResolutionOption, StorageDr
 import { AuthManager } from '../auth/authManager';
 import { CatalogCrawler } from '../catalog/catalogCrawler';
 import { QueueAndChunkManager } from '../queue/queueManager';
+import { CourseSyncAuditor } from '../storage/courseSyncAuditor';
 import { GoogleDriveService } from '../storage/googleDriveService';
 import { VaultDatabase } from '../vault/database';
 
@@ -13,6 +14,7 @@ export interface IpcDependencies {
   catalog: CatalogCrawler;
   queue: QueueAndChunkManager;
   defaultSettings: AppSettings;
+  syncAuditor: CourseSyncAuditor;
   googleDriveService?: GoogleDriveService;
   getMainWindow: () => BrowserWindow | null;
 }
@@ -56,6 +58,22 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     'catalog:scanModuleAttachments',
     async (_event, courseId: string, moduleId: string) => {
       return deps.catalog.scanModuleAttachments(courseId, moduleId);
+    },
+  );
+
+  ipcMain.handle('catalog:auditCourseSync', async (_event, courseId: string) => {
+    return deps.syncAuditor.auditCourseSync(courseId);
+  });
+
+  ipcMain.handle(
+    'catalog:downloadPending',
+    async (
+      _event,
+      courseId: string,
+      resolution: ResolutionOption,
+      options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
+    ) => {
+      return deps.syncAuditor.downloadPending(courseId, resolution, options);
     },
   );
 

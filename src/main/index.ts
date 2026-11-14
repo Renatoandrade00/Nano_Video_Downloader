@@ -13,6 +13,7 @@ import { DecryptionAndRemuxer } from './media/remuxer';
 import { OwnershipVerifier } from './ownership/ownershipVerifier';
 import { QueueAndChunkManager } from './queue/queueManager';
 import { BandwidthLimiter } from './queue/tokenBucket';
+import { CourseSyncAuditor } from './storage/courseSyncAuditor';
 import { GoogleDriveService } from './storage/googleDriveService';
 import { VaultDatabase } from './vault/database';
 import { createElectronOsProtector, createTestProtector, SecretStore } from './vault/secretStore';
@@ -240,6 +241,12 @@ app.whenReady().then(() => {
     },
   );
 
+  const syncAuditor = new CourseSyncAuditor(
+    db,
+    () => db!.getSettings(defaultSettings).libraryRootDir,
+    queue,
+  );
+
   registerLocalMediaProtocol(db);
   registerIpcHandlers({
     db,
@@ -247,6 +254,7 @@ app.whenReady().then(() => {
     catalog,
     queue,
     defaultSettings,
+    syncAuditor,
     googleDriveService,
     getMainWindow: () => mainWindow,
   });
