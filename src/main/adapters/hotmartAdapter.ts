@@ -262,6 +262,7 @@ export class HotmartAdapter implements IPlatformAdapter {
         session.partitionName,
         lessonExternalId,
         courseExternalId,
+        session.bearerToken,
       );
     }
 

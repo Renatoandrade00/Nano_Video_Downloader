@@ -51,6 +51,8 @@ const bridge: NanoElectronBridge = {
       ipcRenderer.invoke('attachments:open', attachmentId),
     downloadAttachment: (attachmentId: string) =>
       ipcRenderer.invoke('attachments:download', attachmentId),
+    downloadModuleAttachments: (moduleId: string) =>
+      ipcRenderer.invoke('attachments:downloadModule', moduleId),
   },
   player: {
     openLesson: (lessonId: string) => ipcRenderer.invoke('player:openLesson', lessonId),

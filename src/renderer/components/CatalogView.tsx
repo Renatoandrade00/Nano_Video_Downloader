@@ -48,6 +48,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [scanningModuleId, setScanningModuleId] = useState<string | null>(null);
   const [scanningLessonId, setScanningLessonId] = useState<string | null>(null);
   const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
+  const [downloadingModulePdfsId, setDownloadingModulePdfsId] = useState<string | null>(null);
 
   const handleSyncCatalog = async () => {
     if (!onSync || isSyncing) return;
@@ -100,6 +101,42 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
       setStatusMsg(err instanceof Error ? err.message : 'Falha ao buscar materiais do módulo.');
     } finally {
       setScanningModuleId(null);
+    }
+  };
+
+  const handleDownloadModulePdfs = async (moduleId: string) => {
+    if (!selectedCourse) return;
+    setDownloadingModulePdfsId(moduleId);
+    setStatusMsg('Verificando PDFs e materiais do módulo...');
+    try {
+      const mod = selectedCourse.modules.find((m) => m.id === moduleId);
+      const existingAttCount =
+        mod?.lessons.reduce((acc, l) => acc + (l.attachments?.length ?? 0), 0) ?? 0;
+      if (existingAttCount === 0) {
+        setStatusMsg('Buscando PDFs das aulas do módulo na plataforma...');
+        await window.antigravity.catalog.scanModuleAttachments(selectedCourse.course.id, moduleId);
+      }
+
+      setStatusMsg('Baixando todos os PDFs do módulo...');
+      const res = await window.antigravity.attachments.downloadModuleAttachments(moduleId);
+      if (res.ok) {
+        setStatusMsg(
+          res.total > 0
+            ? `${res.downloaded} de ${res.total} PDF(s) do módulo baixado(s) com sucesso!`
+            : 'Nenhum material em PDF encontrado neste módulo.',
+        );
+        const refreshed = await window.antigravity.catalog.getCourseDetails(
+          selectedCourse.course.id,
+          false,
+        );
+        setSelectedCourse(refreshed);
+      } else {
+        setStatusMsg(`Falha ao baixar PDFs do módulo: ${res.error ?? 'Erro desconhecido'}`);
+      }
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Falha ao baixar PDFs do módulo.');
+    } finally {
+      setDownloadingModulePdfsId(null);
     }
   };
 
@@ -442,6 +479,22 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                     >
                       <FileText size={13} className={scanningModuleId === mod.id ? 'spin' : ''} />
                       {scanningModuleId === mod.id ? 'Buscando PDFs...' : 'Buscar PDFs do Módulo'}
+                    </button>
+                    <button
+                      className="btn"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                      disabled={!online || downloadingModulePdfsId === mod.id}
+                      onClick={() => void handleDownloadModulePdfs(mod.id)}
+                      title="Baixar todos os arquivos PDF de apoio deste módulo diretamente"
+                    >
+                      <Download size={13} className={downloadingModulePdfsId === mod.id ? 'spin' : ''} />
+                      {downloadingModulePdfsId === mod.id ? 'Baixando PDFs...' : 'Baixar PDFs do Módulo'}
                     </button>
                     <button
                       className="btn"

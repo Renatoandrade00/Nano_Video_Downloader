@@ -1011,6 +1011,35 @@ interface HotmartMediaItem {
   url?: string;
 }
 
+async function extractHlsManifestFromEmbedUrl(embedUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(embedUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        Referer: 'https://hotmart.com/',
+        Origin: 'https://hotmart.com',
+      },
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    const match = text.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (!match) return null;
+    const nextData = JSON.parse(match[1]);
+    const assets = nextData?.props?.pageProps?.applicationData?.mediaAssets;
+    if (Array.isArray(assets) && assets.length > 0) {
+      const m3u8Asset =
+        assets.find(
+          (a: Record<string, unknown>) => typeof a.url === 'string' && a.url.includes('.m3u8'),
+        ) || assets[0];
+      return String(m3u8Asset.url || '');
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 async function resolveExtraPartsFromResponses(
   win: Electron.BrowserWindow,
   webSession: Electron.Session,
@@ -1035,6 +1064,24 @@ async function resolveExtraPartsFromResponses(
     const item = mediasList[i];
     if (!item.url || !item.url.startsWith('http')) continue;
 
+    // 1. Tentar extração instantânea do manifesto direto no HTML do embed
+    const directHls = await extractHlsManifestFromEmbedUrl(item.url);
+    if (directHls) {
+      extraParts.push({
+        partIndex: i + 1,
+        partName: item.name || `Parte ${i + 1}`,
+        kind: 'HLS',
+        manifestUrl: directHls,
+        headers: {
+          Referer: 'https://hotmart.com/',
+          Origin: 'https://hotmart.com',
+        },
+        durationSec: item.duration,
+      });
+      continue;
+    }
+
+    // 2. Fallback de navegação na janela oculta se a extração direta não responder
     let partMedia: MediaPart | null = null;
     const partHandler = (
       details: Electron.OnBeforeSendHeadersListenerDetails,
@@ -1089,7 +1136,105 @@ export async function resolveLiveHotmartLessonMedia(
   partitionName: string,
   lessonExternalId: string,
   courseExternalId?: string,
+  bearerToken?: string | null,
 ): Promise<MediaDescriptor> {
+  const lessonHash =
+    lessonExternalId.match(/content\/([^/?#]+)/)?.[1] ||
+    lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i)?.[1] ||
+    lessonExternalId;
+
+  let activeToken = bearerToken;
+  if (!activeToken && partitionName) {
+    activeToken = await resolveLiveHotmartAccessToken(partitionName);
+  }
+
+  // 1. Tentar resolução direta de todas as partes via API REST nativa da Hotmart
+  if (activeToken && courseExternalId && /^[a-zA-Z0-9]+$/.test(lessonHash)) {
+    try {
+      const lessonApiUrl = `https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v2/web/lessons/${lessonHash}`;
+      const res = await fetch(lessonApiUrl, {
+        headers: {
+          Authorization: `Bearer ${activeToken}`,
+          'x-product-id': String(courseExternalId),
+          Origin: 'https://hotmart.com',
+          Referer: 'https://hotmart.com/',
+        },
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          medias?: Array<{
+            name?: string;
+            code?: string;
+            duration?: number;
+            type?: string;
+            url?: string;
+          }>;
+        };
+
+        if (Array.isArray(data.medias) && data.medias.length > 0) {
+          const firstMedia = data.medias[0];
+          const firstHls = firstMedia.url ? await extractHlsManifestFromEmbedUrl(firstMedia.url) : null;
+
+          if (firstHls) {
+            const extraParts: MediaPart[] = [];
+            for (let i = 1; i < data.medias.length; i++) {
+              const part = data.medias[i];
+              if (part.url) {
+                const partHls = await extractHlsManifestFromEmbedUrl(part.url);
+                if (partHls) {
+                  extraParts.push({
+                    partIndex: i + 1,
+                    partName: part.name || `Parte ${i + 1}`,
+                    kind: 'HLS',
+                    manifestUrl: partHls,
+                    headers: {
+                      Referer: 'https://hotmart.com/',
+                      Origin: 'https://hotmart.com',
+                    },
+                    durationSec: part.duration,
+                  });
+                }
+              }
+            }
+
+            const attachments = await resolveLiveHotmartLessonAttachments(
+              partitionName,
+              lessonExternalId,
+              courseExternalId,
+              activeToken,
+            );
+
+            writeSyncDebugLog({
+              event: 'resolveLiveHotmartLessonMediaDirectApiSuccess',
+              lessonHash,
+              totalParts: data.medias.length,
+              resolvedParts: 1 + extraParts.length,
+              attachmentsCount: attachments.length,
+            });
+
+            return {
+              kind: 'HLS',
+              manifestUrl: firstHls,
+              headers: {
+                Referer: 'https://hotmart.com/',
+                Origin: 'https://hotmart.com',
+              },
+              attachments,
+              extraParts: extraParts.length > 0 ? extraParts : undefined,
+            };
+          }
+        }
+      }
+    } catch (err) {
+      writeSyncDebugLog({
+        event: 'resolveLiveHotmartLessonMediaDirectApiError',
+        lessonHash,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   let targetUrl = lessonExternalId;
   const legacyMatch = lessonExternalId.match(/^https?:\/\/hotmart\.com\/lesson\/([^/?#]+)/i);
   if (legacyMatch && courseExternalId && /^\d+$/.test(courseExternalId)) {

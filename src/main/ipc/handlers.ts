@@ -92,6 +92,21 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return deps.queue.downloadAttachment(attachmentId);
   });
 
+  ipcMain.handle('attachments:downloadModule', async (_event, moduleId: string) => {
+    try {
+      const res = await deps.queue.downloadModuleAttachments(moduleId);
+      return { ok: true, ...res };
+    } catch (err) {
+      return {
+        ok: false,
+        total: 0,
+        downloaded: 0,
+        failed: 0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
   ipcMain.handle(
     'queue:control',
     (_event, action: 'pause' | 'resume' | 'cancel', jobId?: string) => {

@@ -307,6 +307,39 @@ export class QueueAndChunkManager {
     return downloaded;
   }
 
+  async downloadModuleAttachments(
+    moduleId: string,
+  ): Promise<{ total: number; downloaded: number; failed: number }> {
+    const lessons = this.db.getLessonsByModuleId(moduleId);
+    const allAtts: Array<{ id: string; localFilePath: string | null }> = [];
+    for (const lesson of lessons) {
+      const atts = this.db.getLessonAttachments(lesson.id);
+      for (const a of atts) {
+        allAtts.push({ id: a.id, localFilePath: a.localFilePath });
+      }
+    }
+
+    let downloaded = 0;
+    let failed = 0;
+    for (const att of allAtts) {
+      if (
+        att.localFilePath &&
+        fs.existsSync(att.localFilePath) &&
+        fs.statSync(att.localFilePath).size > 0
+      ) {
+        downloaded++;
+        continue;
+      }
+      const res = await this.downloadAttachment(att.id);
+      if (res.ok) {
+        downloaded++;
+      } else {
+        failed++;
+      }
+    }
+    return { total: allAtts.length, downloaded, failed };
+  }
+
   async enqueueLessons(
     lessonIds: string[],
     resolution: ResolutionOption,

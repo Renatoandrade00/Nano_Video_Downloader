@@ -105,18 +105,19 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
 ### Fase 6: Implementação de Multi-Vídeo por Aula e Resolução Direta de PDFs
 *Conclusão da funcionalidade de extração integral de conteúdos compostos por múltiplas partes e materiais anexados:*
 
-1. **Suporte a Múltiplas Partes de Vídeo por Aula:**
-   - Adicionada a interface `MediaPart` e o campo `extraParts?: MediaPart[]` em `platformAdapter.ts`.
-   - `hotmartLiveSession.ts`:
-     - Implementada a função `resolveExtraPartsFromResponses`, que analisa a resposta de `v2/web/lessons/{lessonHash}` e recupera cada elemento do array `medias`.
-     - Para cada vídeo adicional (Partes 2, 3, etc.), resolve a URL de embed correspondente (`cf-embed.play.hotmart.com/embed/{code}`) e obtém o manifesto HLS `.m3u8` com tokens de autorização.
-   - `queueManager.ts`:
-     - O processamento de jobs de download foi atualizado para verificar `descriptor.extraParts`.
-     - Cada parte adicional é baixada de forma segmentada e remuxada sequencialmente pelo FFmpeg com nomeação padronizada:
-       - `{Nome da Aula} — Parte 1.mp4` (vídeo principal)
-       - `{Nome da Aula} — Parte 2.mp4`
-       - `{Nome da Aula} — Parte 3.mp4`
-     - Todas as partes recebem a marca d'água forense e são salvas na pasta correta do módulo.
+1. **Suporte a Múltiplas Partes de Vídeo por Aula (Multi-Vídeo Integral):**
+   - **Causa Raiz da Falha Prévia:** O método anterior dependia de recarregar a janela Chromium oculta para cada parte, fazendo com que o interceptor de rede capturasse o manifesto da Parte 1 repetidas vezes (gerando arquivos com o mesmo tamanho para as partes 1 e 2) e expirasse antes de alcançar a Parte 3.
+   - **Solução Definitiva:**
+     - Integração direta com a API REST da Hotmart: `GET https://api-club-course-consumption-gateway-ga.cb.hotmart.com/v2/web/lessons/{LESSON_HASH}`.
+     - Extração instantânea do manifesto HLS `.m3u8` a partir dos metadados `__NEXT_DATA__` embutidos no HTML do embed oficial (`cf-embed.play.hotmart.com/embed/{code}`), fornecendo a URL assinada única para cada parte (Parte 1, Parte 2, Parte 3...).
+     - Eliminação completa de timeouts e sobreposições de rede, garantindo que todas as partes sejam enfileiradas e baixadas sequencialmente.
+
+2. **Extração e Download em Lote de PDFs por Módulo:**
+   - **Novo Recurso:** Botão **"Baixar PDFs do Módulo"** no cabeçalho de cada módulo no catálogo.
+   - **Fluxo Integrado:**
+     - Ao clicar, se os PDFs do módulo ainda não estiverem listados no banco de dados local, o sistema aciona automaticamente a varredura (`scanModuleAttachments`).
+     - Em seguida, invoca `downloadModuleAttachments(moduleId)`, que itera por todas as aulas do módulo baixando e salvando cada anexo PDF na estrutura oficial de pastas.
+     - Exibe feedback visual em tempo real no painel: `X de Y PDF(s) do módulo baixado(s) com sucesso!`.
 
 2. **Extração e Download Robusto de Materiais PDF:**
    - Descoberta e implementação da **API REST Direta da Hotmart Club**:

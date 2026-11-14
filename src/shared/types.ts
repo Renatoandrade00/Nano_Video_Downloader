@@ -226,6 +226,9 @@ export interface NanoElectronBridge {
   attachments: {
     openAttachment(attachmentId: string): Promise<{ ok: boolean; path?: string; error?: string }>;
     downloadAttachment(attachmentId: string): Promise<{ ok: boolean; path?: string; error?: string }>;
+    downloadModuleAttachments(
+      moduleId: string,
+    ): Promise<{ ok: boolean; total: number; downloaded: number; failed: number; error?: string }>;
   };
   player: {
     openLesson(lessonId: string): Promise<PlayerOpenResult>;

@@ -453,6 +453,13 @@ export class VaultDatabase {
       .run(availability, lessonId);
   }
 
+  getLessonsByModuleId(moduleId: string): LessonRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM lessons WHERE module_id = ? ORDER BY order_index ASC')
+      .all(moduleId) as Array<Record<string, unknown>>;
+    return rows.map(mapLesson);
+  }
+
   getLessonAttachments(lessonId: string): LessonAttachmentRecord[] {
     const rows = this.db
       .prepare('SELECT * FROM lesson_attachments WHERE lesson_id = ? ORDER BY file_name ASC')
