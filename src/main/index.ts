@@ -13,6 +13,7 @@ import { DecryptionAndRemuxer } from './media/remuxer';
 import { OwnershipVerifier } from './ownership/ownershipVerifier';
 import { QueueAndChunkManager } from './queue/queueManager';
 import { BandwidthLimiter } from './queue/tokenBucket';
+import { GoogleDriveService } from './storage/googleDriveService';
 import { VaultDatabase } from './vault/database';
 import { createElectronOsProtector, createTestProtector, SecretStore } from './vault/secretStore';
 import { enableOfflineE2ECheck } from './offlineSmokeCheck';
@@ -123,7 +124,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     show: !isHeadlessE2E,
-    title: 'Nano Video Downloader — Google Antigravity',
+    title: 'Nano Video Downloader — Nano S Tecnologia',
     backgroundColor: '#0f172a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -184,6 +185,13 @@ app.whenReady().then(() => {
     libraryRootDir: defaultLibraryDir,
     bandwidthLimitBytesPerSec: null,
     defaultResolution: '1080p',
+    storageDriver: 'local',
+    googleDrive: {
+      enabled: false,
+      folderUrl: '',
+      folderId: '',
+      mirrorLocal: true,
+    },
   };
 
   const protector = safeStorage.isEncryptionAvailable()
@@ -204,6 +212,13 @@ app.whenReady().then(() => {
   const settings = db.getSettings(defaultSettings);
   const limiter = new BandwidthLimiter(settings.bandwidthLimitBytesPerSec);
 
+  const googleDriveService = new GoogleDriveService(
+    settings.googleDrive,
+    (event) => {
+      broadcast('gdrive:sync', event);
+    },
+  );
+
   const queue = new QueueAndChunkManager(
     db,
     auth,
@@ -216,6 +231,7 @@ app.whenReady().then(() => {
     {
       stagingRootDir: path.join(vaultDir, 'staging'),
       getLibraryRootDir: () => db!.getSettings(defaultSettings).libraryRootDir,
+      googleDriveService,
     },
     {
       onJobProgress: (e) => broadcast('queue:jobProgress', e),
@@ -231,6 +247,7 @@ app.whenReady().then(() => {
     catalog,
     queue,
     defaultSettings,
+    googleDriveService,
     getMainWindow: () => mainWindow,
   });
 

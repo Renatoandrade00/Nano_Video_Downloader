@@ -182,7 +182,7 @@ export function normalizeTransactionStatus(rawStatus: RawTransactionStatus): Lic
 export function buildAuthHeaders(session: DecryptedSession): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    'User-Agent': 'NanoVideoDownloader/1.0 (GoogleAntigravity)',
+    'User-Agent': 'NanoVideoDownloader/1.1 (NanoSTecnologia)',
   };
   if (session.bearerToken) {
     headers.Authorization = `Bearer ${session.bearerToken}`;

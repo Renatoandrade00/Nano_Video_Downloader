@@ -13,6 +13,7 @@ import {
   CourseRecord,
   CourseTreeDetails,
   DownloadJobRecord,
+  GoogleDriveSyncEvent,
   JobProgressEvent,
   ModuleProgressEvent,
   OwnershipRevokedEvent,
@@ -35,6 +36,7 @@ export const App: React.FC = () => {
   const [progressByJob, setProgressByJob] = useState<Record<string, JobProgressEvent>>({});
   const [moduleProgress, setModuleProgress] = useState<Record<string, ModuleProgressEvent>>({});
   const [revocationBanner, setRevocationBanner] = useState<string | null>(null);
+  const [gdriveBanner, setGdriveBanner] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     const [accs, off, jbs, cfg, allCourses] = await Promise.all([
@@ -94,6 +96,17 @@ export const App: React.FC = () => {
         );
         void window.antigravity.queue.listJobs().then(setJobs);
       }),
+      window.antigravity.events.onGoogleDriveSync((e: GoogleDriveSyncEvent) => {
+        if (e.state === 'UPLOADING') {
+          setGdriveBanner(`☁️ Google Drive: Enviando "${e.fileName}" para a pasta compartilhada...`);
+        } else if (e.state === 'COMPLETED') {
+          setGdriveBanner(`☁️ Google Drive: "${e.fileName}" sincronizado com sucesso!`);
+          setTimeout(() => setGdriveBanner(null), 5000);
+        } else if (e.state === 'FAILED') {
+          setGdriveBanner(`⚠️ Falha ao sincronizar "${e.fileName}" no Google Drive: ${e.error || 'Erro desconhecido'}`);
+          setTimeout(() => setGdriveBanner(null), 7000);
+        }
+      }),
     ];
 
     const onBrowserOnline = () => setOnline(true);
@@ -113,7 +126,7 @@ export const App: React.FC = () => {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-title">Nano Video Downloader</div>
-          <div className="brand-sub">Google Antigravity • v1.0.0</div>
+          <div className="brand-sub">Nano S Tecnologia • v1.1.0</div>
         </div>
 
         <nav className="nav-list">
@@ -171,6 +184,30 @@ export const App: React.FC = () => {
             <span>{revocationBanner}</span>
             <button className="btn" onClick={() => setRevocationBanner(null)}>
               Fechar
+            </button>
+          </div>
+        )}
+
+        {gdriveBanner && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: 'rgba(99, 102, 241, 0.15)',
+              border: '1px solid rgba(99, 102, 241, 0.4)',
+              color: '#c7d2fe',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span>{gdriveBanner}</span>
+            <button
+              onClick={() => setGdriveBanner(null)}
+              style={{ background: 'none', border: 'none', color: '#a5b4fc', cursor: 'pointer', fontSize: 13 }}
+            >
+              ✕
             </button>
           </div>
         )}

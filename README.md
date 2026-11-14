@@ -1,6 +1,6 @@
 # Nano Video Downloader
 
-Aplicação desktop offline-first construída com arquitetura **Google Antigravity** (**Electron + TypeScript + React + SQLite + FFmpeg**) para autenticação legítima em plataformas de ensino (Hotmart e Kiwify), validação de titularidade, download segmentado resiliente e reprodução offline em player nativo embutido.
+Aplicação desktop offline-first desenvolvida pela **Nano S Tecnologia** (**Electron + TypeScript + React + SQLite + FFmpeg**) para autenticação legítima em plataformas de ensino (Hotmart e Kiwify), validação de titularidade, download segmentado resiliente e reprodução offline em player nativo embutido.
 
 ---
 

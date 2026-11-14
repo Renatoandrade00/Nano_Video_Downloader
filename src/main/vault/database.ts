@@ -10,6 +10,7 @@ import {
   CourseRecord,
   CourseTreeDetails,
   DownloadJobRecord,
+  GoogleDriveConfig,
   JobState,
   LessonAttachmentRecord,
   LessonAvailability,
@@ -22,6 +23,7 @@ import {
   ResolutionOption,
   SegmentCheckpointRecord,
   SegmentStatus,
+  StorageDriver,
   StreamType,
   TrackType,
 } from '../../shared/types';
@@ -840,6 +842,15 @@ export class VaultDatabase {
       defaultResolution:
         (map.get('defaultResolution') as ResolutionOption | undefined) ??
         defaultSettings.defaultResolution,
+      storageDriver:
+        (map.get('storageDriver') as StorageDriver | undefined) ??
+        defaultSettings.storageDriver,
+      googleDrive: map.has('googleDrive')
+        ? {
+            ...defaultSettings.googleDrive,
+            ...(JSON.parse(map.get('googleDrive')!) as Partial<GoogleDriveConfig>),
+          }
+        : defaultSettings.googleDrive,
     };
   }
 

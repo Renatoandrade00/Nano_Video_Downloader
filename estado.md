@@ -5,7 +5,7 @@
 
 ## 1. Visão Geral do Sistema
 
-O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvida em **Electron + React 19 + TypeScript + Vite**, baseada nos princípios de conformidade estrita da arquitetura Google Antigravity. A ferramenta destina-se a estudantes e profissionais que adquiriram cursos legitimamente em plataformas como **Hotmart** e **Kiwify**, permitindo o estudo offline com organização automática de vídeos e materiais complementares em PDF.
+O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvida em **Electron + React 19 + TypeScript + Vite** pela **Nano S Tecnologia**. A ferramenta destina-se a estudantes e profissionais que adquiriram cursos legitimamente em plataformas como **Hotmart** e **Kiwify**, permitindo o estudo offline com organização automática de vídeos e materiais complementares em PDF.
 
 ### Premissas e Diretrizes Fundamentais
 - **Legitimidade & DRM:** O software **nunca** burla nem quebra sistemas de criptografia Widevine/FairPlay/PlayReady (DRM). Ele consome streams e arquivos acessíveis ao usuário com titularidade ativa e verificada.

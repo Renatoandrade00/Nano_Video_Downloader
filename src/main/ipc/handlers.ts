@@ -1,9 +1,10 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
-import { AppSettings, PlatformId, ResolutionOption } from '../../shared/types';
+import { AppSettings, GoogleDriveConfig, PlatformId, ResolutionOption, StorageDriver } from '../../shared/types';
 import { AuthManager } from '../auth/authManager';
 import { CatalogCrawler } from '../catalog/catalogCrawler';
 import { QueueAndChunkManager } from '../queue/queueManager';
+import { GoogleDriveService } from '../storage/googleDriveService';
 import { VaultDatabase } from '../vault/database';
 
 export interface IpcDependencies {
@@ -12,6 +13,7 @@ export interface IpcDependencies {
   catalog: CatalogCrawler;
   queue: QueueAndChunkManager;
   defaultSettings: AppSettings;
+  googleDriveService?: GoogleDriveService;
   getMainWindow: () => BrowserWindow | null;
 }
 
@@ -191,5 +193,45 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       return null;
     }
     return res.filePaths[0];
+  });
+
+  ipcMain.handle(
+    'settings:updateStorageConfig',
+    (
+      _event,
+      payload: {
+        storageDriver?: StorageDriver;
+        googleDrive?: Partial<GoogleDriveConfig>;
+      },
+    ) => {
+      const current = deps.db.getSettings(deps.defaultSettings);
+      if (payload.storageDriver) {
+        deps.db.saveSetting('storageDriver', payload.storageDriver);
+      }
+      if (payload.googleDrive) {
+        const updatedGD = {
+          ...current.googleDrive,
+          ...payload.googleDrive,
+        };
+        deps.db.saveSetting('googleDrive', updatedGD);
+        deps.googleDriveService?.updateConfig(updatedGD);
+      }
+      return deps.db.getSettings(deps.defaultSettings);
+    },
+  );
+
+  ipcMain.handle(
+    'settings:testGoogleDriveConnection',
+    async (_event, folderUrl: string, uploadEndpoint?: string) => {
+      if (deps.googleDriveService) {
+        return deps.googleDriveService.testConnection(folderUrl, uploadEndpoint);
+      }
+      const dummy = new GoogleDriveService(deps.defaultSettings.googleDrive);
+      return dummy.testConnection(folderUrl, uploadEndpoint);
+    },
+  );
+
+  ipcMain.handle('settings:getGoogleDriveScriptTemplate', () => {
+    return GoogleDriveService.getScriptTemplate();
   });
 }

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+  GoogleDriveConfig,
+  GoogleDriveSyncEvent,
   JobCompletedEvent,
   JobProgressEvent,
   ModuleProgressEvent,
@@ -8,6 +10,7 @@ import {
   OwnershipRevokedEvent,
   PlatformId,
   ResolutionOption,
+  StorageDriver,
 } from '../shared/types';
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -67,6 +70,14 @@ const bridge: NanoElectronBridge = {
     get: () => ipcRenderer.invoke('settings:get'),
     setLibraryDir: (dirPath: string) => ipcRenderer.invoke('settings:setLibraryDir', dirPath),
     pickLibraryDir: () => ipcRenderer.invoke('settings:pickLibraryDir'),
+    updateStorageConfig: (config: {
+      storageDriver?: StorageDriver;
+      googleDrive?: Partial<GoogleDriveConfig>;
+    }) => ipcRenderer.invoke('settings:updateStorageConfig', config),
+    testGoogleDriveConnection: (folderUrl: string, uploadEndpoint?: string) =>
+      ipcRenderer.invoke('settings:testGoogleDriveConnection', folderUrl, uploadEndpoint),
+    getGoogleDriveScriptTemplate: () =>
+      ipcRenderer.invoke('settings:getGoogleDriveScriptTemplate'),
   },
   events: {
     onNetworkStatus: (cb: (e: NetworkStatusEvent) => void) =>
@@ -77,6 +88,8 @@ const bridge: NanoElectronBridge = {
     onModuleProgress: (cb: (e: ModuleProgressEvent) => void) =>
       subscribe('queue:moduleProgress', cb),
     onJobCompleted: (cb: (e: JobCompletedEvent) => void) => subscribe('queue:jobCompleted', cb),
+    onGoogleDriveSync: (cb: (e: GoogleDriveSyncEvent) => void) =>
+      subscribe('gdrive:sync', cb),
   },
 };
 

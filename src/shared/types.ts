@@ -192,10 +192,41 @@ export interface PlayerOpenResult {
   watermark: AuditWatermarkRecord | null;
 }
 
+export type StorageDriver = 'local' | 'gdrive' | 'both';
+
+export interface GoogleDriveConfig {
+  enabled: boolean;
+  folderUrl: string;
+  folderId: string;
+  uploadEndpoint?: string;
+  localSyncPath?: string;
+  mirrorLocal: boolean;
+}
+
+export interface GoogleDriveTestResult {
+  ok: boolean;
+  folderId?: string;
+  mode: 'desktop_sync' | 'webhook' | 'public_folder';
+  message: string;
+  localDrivePath?: string;
+}
+
+export interface GoogleDriveSyncEvent {
+  jobId?: string;
+  attachmentId?: string;
+  fileName: string;
+  state: 'UPLOADING' | 'COMPLETED' | 'FAILED';
+  progressPercent: number;
+  driveUrl?: string;
+  error?: string;
+}
+
 export interface AppSettings {
   libraryRootDir: string;
   bandwidthLimitBytesPerSec: number | null;
   defaultResolution: ResolutionOption;
+  storageDriver: StorageDriver;
+  googleDrive: GoogleDriveConfig;
 }
 
 export interface NanoElectronBridge {
@@ -243,6 +274,15 @@ export interface NanoElectronBridge {
     get(): Promise<AppSettings>;
     setLibraryDir(dirPath: string): Promise<AppSettings>;
     pickLibraryDir(): Promise<string | null>;
+    updateStorageConfig(config: {
+      storageDriver?: StorageDriver;
+      googleDrive?: Partial<GoogleDriveConfig>;
+    }): Promise<AppSettings>;
+    testGoogleDriveConnection(
+      folderUrl: string,
+      uploadEndpoint?: string,
+    ): Promise<GoogleDriveTestResult>;
+    getGoogleDriveScriptTemplate(): Promise<string>;
   };
   events: {
     onNetworkStatus(cb: (event: NetworkStatusEvent) => void): () => void;
@@ -250,6 +290,7 @@ export interface NanoElectronBridge {
     onJobProgress(cb: (event: JobProgressEvent) => void): () => void;
     onModuleProgress(cb: (event: ModuleProgressEvent) => void): () => void;
     onJobCompleted(cb: (event: JobCompletedEvent) => void): () => void;
+    onGoogleDriveSync(cb: (event: GoogleDriveSyncEvent) => void): () => void;
   };
 }
 

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildStructuredAttachmentPath, buildStructuredLessonPath } from '../../shared/pathSanitizer';
+import { buildStructuredAttachmentPath, buildStructuredLessonPath, formatCourseFolder, formatModuleFolder } from '../../shared/pathSanitizer';
 import {
   DownloadJobRecord,
   JobCompletedEvent,
@@ -19,6 +19,7 @@ import { AuthManager } from '../auth/authManager';
 import { InspectedMediaPlan, MediaStreamInspector, SegmentDownloadTask } from '../media/mediaInspector';
 import { decryptAes128Buffer, DecryptionAndRemuxer } from '../media/remuxer';
 import { OwnershipVerifier } from '../ownership/ownershipVerifier';
+import { GoogleDriveService } from '../storage/googleDriveService';
 import { VaultDatabase } from '../vault/database';
 import { SecretStore } from '../vault/secretStore';
 import { BandwidthLimiter } from './tokenBucket';
@@ -36,6 +37,7 @@ export interface QueueConfig {
   maxChunksPerLesson?: number;
   maxSegmentRetries?: number;
   fetchFn?: FetchLike;
+  googleDriveService?: GoogleDriveService;
 }
 
 export class QueueAndChunkManager {
@@ -48,7 +50,11 @@ export class QueueAndChunkManager {
   private readonly secrets: SecretStore;
   private readonly limiter: BandwidthLimiter;
   private readonly events: QueueEvents;
-  private readonly config: Required<Omit<QueueConfig, 'fetchFn'>> & { fetchFn: FetchLike };
+  private readonly config: Required<Omit<QueueConfig, 'fetchFn' | 'googleDriveService'>> & {
+    fetchFn: FetchLike;
+    googleDriveService?: GoogleDriveService;
+  };
+  private readonly googleDriveService?: GoogleDriveService;
 
   private readonly activeControllers = new Map<string, AbortController>();
   private readonly activeLessonIds = new Set<string>();
@@ -78,6 +84,7 @@ export class QueueAndChunkManager {
     this.secrets = secrets;
     this.limiter = limiter;
     this.events = events;
+    this.googleDriveService = config.googleDriveService;
     this.config = {
       stagingRootDir: config.stagingRootDir,
       getLibraryRootDir: config.getLibraryRootDir,
@@ -85,6 +92,7 @@ export class QueueAndChunkManager {
       maxChunksPerLesson: config.maxChunksPerLesson ?? 3,
       maxSegmentRetries: config.maxSegmentRetries ?? 5,
       fetchFn: config.fetchFn ?? fetch,
+      googleDriveService: config.googleDriveService,
     };
     fs.mkdirSync(this.config.stagingRootDir, { recursive: true });
   }
@@ -136,6 +144,20 @@ export class QueueAndChunkManager {
 
     if (fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
       this.db.updateAttachmentLocalPath(att.id, destPath);
+      if (this.googleDriveService) {
+        const relativePath = path.join(
+          formatCourseFolder(ctx.course.title),
+          formatModuleFolder(ctx.module.orderIndex),
+          'Materiais',
+        );
+        void this.googleDriveService.syncFile({
+          attachmentId: att.id,
+          localFilePath: destPath,
+          relativePath,
+          fileName: att.fileName,
+          mimeType: att.fileName.endsWith('.pdf') ? 'application/pdf' : undefined,
+        });
+      }
       return { ok: true, path: destPath };
     }
 
@@ -284,6 +306,20 @@ export class QueueAndChunkManager {
 
       fs.renameSync(tempDest, destPath);
       this.db.updateAttachmentLocalPath(att.id, destPath);
+      if (this.googleDriveService) {
+        const relativePath = path.join(
+          formatCourseFolder(ctx.course.title),
+          formatModuleFolder(ctx.module.orderIndex),
+          'Materiais',
+        );
+        void this.googleDriveService.syncFile({
+          attachmentId: att.id,
+          localFilePath: destPath,
+          relativePath,
+          fileName: att.fileName,
+          mimeType: att.fileName.endsWith('.pdf') ? 'application/pdf' : undefined,
+        });
+      }
       return { ok: true, path: destPath };
     } catch (err) {
       if (fs.existsSync(tempDest)) {
@@ -679,6 +715,20 @@ export class QueueAndChunkManager {
       this.db.saveWatermark(remuxResult.watermark);
       this.db.setLessonLocalFile(ctx.lesson.id, remuxResult.finalPath);
 
+      if (this.googleDriveService) {
+        const relativePath = path.join(
+          formatCourseFolder(ctx.course.title),
+          formatModuleFolder(ctx.module.orderIndex),
+        );
+        void this.googleDriveService.syncFile({
+          jobId,
+          localFilePath: remuxResult.finalPath,
+          relativePath,
+          fileName: path.basename(remuxResult.finalPath),
+          mimeType: 'video/mp4',
+        });
+      }
+
       // Se a aula possui partes adicionais (Parte 2, Parte 3...), baixar e remuxar cada uma sequencialmente
       if (hasExtraParts && descriptor.extraParts) {
         for (const part of descriptor.extraParts) {
@@ -736,6 +786,20 @@ export class QueueAndChunkManager {
                 purchaseRef: access.purchaseRef ?? 'AUTHORIZED',
               },
             });
+
+            if (this.googleDriveService) {
+              const relativePath = path.join(
+                formatCourseFolder(ctx.course.title),
+                formatModuleFolder(ctx.module.orderIndex),
+              );
+              void this.googleDriveService.syncFile({
+                jobId: `${jobId}_part${part.partIndex}`,
+                localFilePath: partTargetFilePath,
+                relativePath,
+                fileName: path.basename(partTargetFilePath),
+                mimeType: 'video/mp4',
+              });
+            }
 
             try {
               fs.rmSync(partStagingDir, { recursive: true, force: true });
