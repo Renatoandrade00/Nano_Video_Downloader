@@ -189,7 +189,7 @@ export class QueueAndChunkManager {
           try {
             const { resolveLiveHotmartAccessToken } = await import('../adapters/hotmartLiveSession');
             const refreshed = await resolveLiveHotmartAccessToken(session.partitionName);
-            if (refreshed && refreshed !== token) {
+            if (refreshed) {
               token = refreshed;
               session.bearerToken = token;
               this.secrets.encryptJson(ctx.account.credentialRef, session);
