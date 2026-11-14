@@ -3,6 +3,7 @@ import path from 'node:path';
 import { isAllowedWebUrl } from '../../shared/urlGuard';
 import {
   MediaDescriptor,
+  MediaPart,
   PurchaseRecord,
   RemoteAttachmentNode,
   RemoteCourseTree,
@@ -888,13 +889,13 @@ async function extractAttachmentsFromLessonPage(
           Boolean(obj.fileMembershipAttachmentId);
 
         if (isPdfOrMaterial) {
-          const attachmentId = String(obj.id ?? obj.fileMembershipAttachmentId ?? obj.attachmentId ?? '');
+          const attachmentId = String(obj.fileMembershipId ?? obj.id ?? obj.fileMembershipAttachmentId ?? obj.attachmentId ?? '');
           const effectiveUrl = rawUrl.startsWith('http')
             ? rawUrl
             : rawUrl.startsWith('/')
               ? `https://hotmart.com${rawUrl}`
               : attachmentId
-                ? `https://hotmart.com/club-content/api/v1/attachments/${attachmentId}/download-url`
+                ? `https://api-club-hot-club-api.cb.hotmart.com/rest/v3/attachment/${attachmentId}/download`
                 : '';
 
           if (effectiveUrl && !seenUrls.has(effectiveUrl)) {
@@ -906,7 +907,7 @@ async function extractAttachmentsFromLessonPage(
               fileName,
               fileUrl: effectiveUrl,
               fileType: String(obj.type ?? ext),
-              fileSize: typeof obj.size === 'number' ? obj.size : undefined,
+              fileSize: typeof obj.size === 'number' ? obj.size : (typeof obj.fileSize === 'number' ? obj.fileSize : undefined),
             });
           }
         }
@@ -922,16 +923,25 @@ async function extractAttachmentsFromLessonPage(
     const domAtts = (await win.webContents.executeJavaScript(
       `(() => {
         const items = [];
-        // Clicar na aba de Materiais se houver
+
+        // 1. Fechar banner de cookies se houver
+        const okBtn = Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').trim().toLowerCase() === 'ok');
+        if (okBtn) try { okBtn.click(); } catch(e) {}
+        const cookieBanners = Array.from(document.querySelectorAll('*')).filter(el => /este site utiliza cookies/i.test(el.textContent || '') && el.children.length <= 4);
+        for (const b of cookieBanners) {
+          const container = b.closest('div[style*="fixed"], div[class*="cookie"]') || b.parentElement;
+          if (container) try { container.remove(); } catch(e) {}
+        }
+
+        // 2. Scroll para baixo até área de informações da aula
+        window.scrollBy(0, 650);
+
+        // 3. Clicar na aba de Materiais se houver
         const allElements = Array.from(document.querySelectorAll('button, [role="tab"], a, div, span, li, p'));
         const matTab = allElements.find(el => {
           const t = (el.textContent || '').trim();
-          const isTab = el.tagName === 'BUTTON' || el.getAttribute('role') === 'tab' || /tab/i.test(el.className || '');
-          return isTab && /materiais/i.test(t);
-        }) || allElements.find(el => {
-          const t = (el.textContent || '').trim();
-          return /^materiais(\\s*\\(?\\d+\\)?)?$/i.test(t) && el.children.length <= 4;
-        });
+          return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 4;
+        }) || allElements.find(el => /materiais/i.test((el.textContent || '').trim()) && el.children.length <= 2);
 
         if (matTab) {
           try { matTab.click(); } catch(e) {}
@@ -990,6 +1000,89 @@ async function extractAttachmentsFromLessonPage(
   }
 
   return result;
+}
+
+interface HotmartMediaItem {
+  name?: string;
+  size?: number;
+  duration?: number;
+  code?: string;
+  type?: string;
+  url?: string;
+}
+
+async function resolveExtraPartsFromResponses(
+  win: Electron.BrowserWindow,
+  webSession: Electron.Session,
+  responses: CapturedJsonResponse[],
+): Promise<MediaPart[]> {
+  const extraParts: MediaPart[] = [];
+  let mediasList: HotmartMediaItem[] = [];
+
+  for (const r of responses) {
+    if (r.body && typeof r.body === 'object') {
+      const b = r.body as Record<string, unknown>;
+      if (Array.isArray(b.medias) && b.medias.length > 1) {
+        mediasList = b.medias as HotmartMediaItem[];
+        break;
+      }
+    }
+  }
+
+  if (mediasList.length <= 1) return extraParts;
+
+  for (let i = 1; i < mediasList.length; i++) {
+    const item = mediasList[i];
+    if (!item.url || !item.url.startsWith('http')) continue;
+
+    let partMedia: MediaPart | null = null;
+    const partHandler = (
+      details: Electron.OnBeforeSendHeadersListenerDetails,
+      callback: (resp: Electron.BeforeSendResponse) => void,
+    ) => {
+      const url = details.url;
+      if (/(\.m3u8(\?|$)|master\.m3u8|playlist\.m3u8)/i.test(url) && !partMedia) {
+        partMedia = {
+          partIndex: i + 1,
+          partName: item.name || `Parte ${i + 1}`,
+          kind: 'HLS',
+          manifestUrl: url,
+          headers: { ...details.requestHeaders },
+          durationSec: item.duration,
+        };
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    };
+
+    webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, partHandler);
+
+    try {
+      await safeLoadUrl(win, item.url);
+      const startMs = Date.now();
+      while (Date.now() - startMs < 7000 && !partMedia) {
+        await win.webContents
+          .executeJavaScript(
+            `(() => {
+              const btn = document.querySelector('button[aria-label*="play" i], .vjs-big-play-button, video');
+              if (btn) btn.click();
+            })()`,
+            true,
+          )
+          .catch(() => {});
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    } catch {
+      // Ignore part navigation error
+    } finally {
+      webSession.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, null);
+    }
+
+    if (partMedia) {
+      extraParts.push(partMedia);
+    }
+  }
+
+  return extraParts;
 }
 
 export async function resolveLiveHotmartLessonMedia(
@@ -1060,7 +1153,12 @@ export async function resolveLiveHotmartLessonMedia(
       if (foundMedia) {
         const media = foundMedia as MediaDescriptor;
         const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
-        return { ...media, attachments };
+        const extraParts = await resolveExtraPartsFromResponses(win, webSession, interceptor.responses);
+        return {
+          ...media,
+          attachments,
+          extraParts: extraParts.length > 0 ? extraParts : undefined,
+        };
       }
       if (sawDrmLicense) {
         const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
@@ -1107,6 +1205,7 @@ export async function resolveLiveHotmartLessonMedia(
 
       if (videoSrc) {
         const attachments = await extractAttachmentsFromLessonPage(win, interceptor.responses, lessonExternalId);
+        const extraParts = await resolveExtraPartsFromResponses(win, webSession, interceptor.responses);
         return {
           kind: videoSrc.includes('.m3u8')
             ? 'HLS'
@@ -1115,6 +1214,7 @@ export async function resolveLiveHotmartLessonMedia(
               : 'DIRECT',
           manifestUrl: videoSrc,
           attachments,
+          extraParts: extraParts.length > 0 ? extraParts : undefined,
         };
       }
 
@@ -1204,16 +1304,25 @@ export async function resolveLiveHotmartLessonAttachments(
       }
 
       // 1. Clicar na aba "Materiais" assim que aparecer no DOM
-      if (!clickedMatTab && Date.now() - startMs > 2000) {
+      if (!clickedMatTab && Date.now() - startMs > 1500) {
         clickedMatTab = (await win.webContents
           .executeJavaScript(
             `(() => {
+              // Fechar cookies se houver
+              const ok = Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').trim().toLowerCase() === 'ok');
+              if (ok) try { ok.click(); } catch(e) {}
+              const cookieBanners = Array.from(document.querySelectorAll('*')).filter(el => /este site utiliza cookies/i.test(el.textContent || '') && el.children.length <= 4);
+              for (const b of cookieBanners) {
+                const c = b.closest('div[style*="fixed"], div[class*="cookie"]') || b.parentElement;
+                if (c) try { c.remove(); } catch(e) {}
+              }
+              window.scrollBy(0, 650);
+
               const all = Array.from(document.querySelectorAll('button, [role="tab"], a, div, span, p, li'));
               const tab = all.find(el => {
                 const t = (el.textContent || '').trim();
-                const isTab = el.tagName === 'BUTTON' || el.getAttribute('role') === 'tab' || /tab/i.test(el.className || '');
-                return isTab && /materiais/i.test(t);
-              }) || all.find(el => /^materiais(\\s*\\(?\\d+\\)?)?$/i.test((el.textContent || '').trim()));
+                return /^materiais(\\s*\\d+)?$/i.test(t) && el.children.length <= 4;
+              }) || all.find(el => /materiais/i.test((el.textContent || '').trim()) && el.children.length <= 2);
 
               if (tab) {
                 tab.click();

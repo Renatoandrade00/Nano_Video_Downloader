@@ -101,7 +101,28 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
      - Parte 1: `AULA 1 PT1.mov` (`WLalddzyqk`, 972s)
      - Parte 2: `AULA 1 PT2.mov` (`2qYvKKbOLB`, 826s)
      - Parte 3: `Aula 1 PT 3_11NOV.mp4` (`4qXXgaWpqv`, 1122s)
-   - *Ação necessária:* Atualizar a árvore de módulos e a fila de downloads para suportar múltiplas mídias por aula, gerando arquivos separados (`{Aula} — Parte 1.mp4`, `{Aula} — Parte 2.mp4`, etc.) para garantir o download integral de todas as partes.
+
+### Fase 6: Implementação de Multi-Vídeo por Aula e Resolução Direta de PDFs
+*Conclusão da funcionalidade de extração integral de conteúdos compostos por múltiplas partes e materiais anexados:*
+
+1. **Suporte a Múltiplas Partes de Vídeo por Aula:**
+   - Adicionada a interface `MediaPart` e o campo `extraParts?: MediaPart[]` em `platformAdapter.ts`.
+   - `hotmartLiveSession.ts`:
+     - Implementada a função `resolveExtraPartsFromResponses`, que analisa a resposta de `v2/web/lessons/{lessonHash}` e recupera cada elemento do array `medias`.
+     - Para cada vídeo adicional (Partes 2, 3, etc.), resolve a URL de embed correspondente (`cf-embed.play.hotmart.com/embed/{code}`) e obtém o manifesto HLS `.m3u8` com tokens de autorização.
+   - `queueManager.ts`:
+     - O processamento de jobs de download foi atualizado para verificar `descriptor.extraParts`.
+     - Cada parte adicional é baixada de forma segmentada e remuxada sequencialmente pelo FFmpeg com nomeação padronizada:
+       - `{Nome da Aula} — Parte 1.mp4` (vídeo principal)
+       - `{Nome da Aula} — Parte 2.mp4`
+       - `{Nome da Aula} — Parte 3.mp4`
+     - Todas as partes recebem a marca d'água forense e são salvas na pasta correta do módulo.
+
+2. **Extração e Download Robusto de Materiais PDF:**
+   - Mapeamento direto de `fileMembershipId` nos metadados de anexos.
+   - Integração com o endpoint nativo `https://api-club-hot-club-api.cb.hotmart.com/rest/v3/attachment/{fileMembershipId}/download`.
+   - Remoção programática de modais e banners de consentimento de cookies ("Este site utiliza cookies") e rolagem automática (`window.scrollBy`) antes de simular cliques na aba *Materiais*.
+   - Script de auxílio e sincronização de sessão via Playwright (`scripts/inspect_playwright.mjs` e `inspecionar_com_playwright.bat`), permitindo login interativo com janela visível caso a sessão do usuário expire.
 
 ---
 

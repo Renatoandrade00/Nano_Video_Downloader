@@ -13,6 +13,7 @@ import {
   TrackType,
 } from '../../shared/types';
 import { FetchLike } from '../adapters/hotmartAdapter';
+import { MediaDescriptor } from '../adapters/platformAdapter';
 import { AdapterRegistry } from '../adapters/registry';
 import { AuthManager } from '../auth/authManager';
 import { InspectedMediaPlan, MediaStreamInspector, SegmentDownloadTask } from '../media/mediaInspector';
@@ -508,13 +509,18 @@ export class QueueAndChunkManager {
       this.db.updateJobState(jobId, 'REMUXING');
       this.emitProgressByJobId(jobId, true);
 
-      const targetFilePath = buildStructuredLessonPath({
+      const hasExtraParts = Boolean(descriptor.extraParts && descriptor.extraParts.length > 0);
+      const baseLessonFilePath = buildStructuredLessonPath({
         libraryRootDir: this.config.getLibraryRootDir(),
         courseTitle: ctx.course.title,
         moduleOrder: ctx.module.orderIndex,
         lessonOrder: ctx.lesson.orderIndex,
         lessonTitle: ctx.lesson.title,
       });
+
+      const targetFilePath = hasExtraParts
+        ? baseLessonFilePath.replace(/\.mp4$/i, ' — Parte 1.mp4')
+        : baseLessonFilePath;
 
       const videoCount = plan.segments.filter((s) => s.trackType === 'VIDEO').length;
       const audioCount = plan.segments.filter((s) => s.trackType === 'AUDIO').length;
@@ -535,7 +541,7 @@ export class QueueAndChunkManager {
         metadata: {
           courseTitle: ctx.course.title,
           moduleTitle: ctx.module.title,
-          lessonTitle: ctx.lesson.title,
+          lessonTitle: hasExtraParts ? `${ctx.lesson.title} — Parte 1` : ctx.lesson.title,
           platform: ctx.account.platform,
           accountEmailHash: ctx.account.emailHash,
           purchaseRef: access.purchaseRef ?? 'AUTHORIZED',
@@ -544,6 +550,75 @@ export class QueueAndChunkManager {
 
       this.db.saveWatermark(remuxResult.watermark);
       this.db.setLessonLocalFile(ctx.lesson.id, remuxResult.finalPath);
+
+      // Se a aula possui partes adicionais (Parte 2, Parte 3...), baixar e remuxar cada uma sequencialmente
+      if (hasExtraParts && descriptor.extraParts) {
+        for (const part of descriptor.extraParts) {
+          if (controller.signal.aborted) break;
+          try {
+            const partDescriptor: MediaDescriptor = {
+              kind: part.kind,
+              manifestUrl: part.manifestUrl,
+              headers: part.headers,
+            };
+            const partPlan = await this.inspector.inspect(partDescriptor, job.targetResolution);
+            const partStagingDir = `${job.stagingDir}_part${part.partIndex}`;
+            fs.mkdirSync(partStagingDir, { recursive: true });
+
+            const partInitFiles = await this.downloadInitSegments(partPlan, partStagingDir, controller.signal);
+            await this.downloadSegmentsConcurrently(
+              jobId,
+              ctx.module.id,
+              ctx.course.id,
+              partStagingDir,
+              partPlan,
+              partPlan.segments,
+              controller.signal,
+            );
+
+            if (controller.signal.aborted) break;
+
+            const partTargetFilePath = baseLessonFilePath.replace(
+              /\.mp4$/i,
+              ` — Parte ${part.partIndex}.mp4`,
+            );
+
+            const pVideoCount = partPlan.segments.filter((s) => s.trackType === 'VIDEO').length;
+            const pAudioCount = partPlan.segments.filter((s) => s.trackType === 'AUDIO').length;
+            const pMuxedCount = partPlan.segments.filter((s) => s.trackType === 'MUXED').length;
+
+            await this.remuxer.remuxLesson({
+              jobId: `${jobId}_part${part.partIndex}`,
+              stagingDir: partStagingDir,
+              targetFilePath: partTargetFilePath,
+              streamType: partPlan.streamType,
+              tracks: {
+                hasSeparateAudio: pVideoCount > 0 && pAudioCount > 0,
+                videoCount: pVideoCount,
+                audioCount: pAudioCount,
+                muxedCount: pMuxedCount,
+                initFiles: partInitFiles,
+              },
+              metadata: {
+                courseTitle: ctx.course.title,
+                moduleTitle: ctx.module.title,
+                lessonTitle: `${ctx.lesson.title} — Parte ${part.partIndex}`,
+                platform: ctx.account.platform,
+                accountEmailHash: ctx.account.emailHash,
+                purchaseRef: access.purchaseRef ?? 'AUTHORIZED',
+              },
+            });
+
+            try {
+              fs.rmSync(partStagingDir, { recursive: true, force: true });
+            } catch {
+              // Ignore part staging cleanup error
+            }
+          } catch {
+            // Keep going with remaining parts if one fails
+          }
+        }
+      }
       this.db.updateJobState(jobId, 'COMPLETED', null);
       this.emitProgressByJobId(jobId, true);
 

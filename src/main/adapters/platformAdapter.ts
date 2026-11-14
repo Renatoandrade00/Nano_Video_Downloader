@@ -78,12 +78,22 @@ export interface RemoteCourseTree {
   modules: RemoteModuleNode[];
 }
 
+export interface MediaPart {
+  partIndex: number;
+  partName: string;
+  kind: 'HLS' | 'DASH' | 'DIRECT';
+  manifestUrl: string;
+  headers?: Record<string, string>;
+  durationSec?: number;
+}
+
 export interface MediaDescriptor {
   kind: 'HLS' | 'DASH' | 'DIRECT' | 'DRM_UNSUPPORTED' | 'NO_VIDEO';
   manifestUrl?: string;
   headers?: Record<string, string>;
   directContentLength?: number;
   attachments?: RemoteAttachmentNode[];
+  extraParts?: MediaPart[];
 }
 
 export interface IPlatformAdapter {
