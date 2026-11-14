@@ -138,6 +138,17 @@ O **Nano Video Downloader** é uma aplicação desktop offline-first desenvolvid
    - **Estabilidade do Lançador Windows (`Abrir Nano Video Downloader.bat`):**
      - O script `.bat` configura o `PATH` do sistema com Node/NVM e inicia diretamente o executável Electron (`node_modules\electron\dist\electron.exe .`), garantindo abertura instantânea mesmo sem compilação prévia pelo usuário.
 
+### Fase 7: Versão 1.1.0 e Novo Instalador Oficial Windows
+*Geração do instalador executável definitivo contemplando todas as correções de estabilidade e novos recursos de download em lote e multi-vídeo:*
+- **Incremento de Versão:** Atualização do projeto para a versão **1.1.0** em `package.json`, `README.md` e metadados de compilação.
+- **Empacotamento NSIS Completo:** Execução de `pnpm run dist`, gerando o instalador oficial `release/Nano Video Downloader Setup 1.1.0.exe` (156 MB) com o binário `bin/ffmpeg.exe` embutido nativamente em `extraResources`.
+- **Rastreamento via Git LFS:** Arquivo executável e blockmap integrados ao Git LFS para controle de versão sem restrição de tamanho.
+- **Funcionalidades Consolidadas no Instalador:**
+  - Extração e download integral de aulas multi-vídeo (Partes 1, 2, 3...) com manifestos exclusivos.
+  - Botão **"Baixar PDFs do Módulo"** no cabeçalho dos módulos com feedback em lote.
+  - Resolução automática e silenciosa de tokens OIDC da partição, eliminando o erro HTTP 403.
+  - Sincronização offline-first e biblioteca local com marca d'água forense.
+
 ---
 
 ## 4. Matriz de Estado dos Componentes

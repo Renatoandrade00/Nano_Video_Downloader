@@ -1,8 +1,8 @@
-version: 1.0.0
+version: 1.1.0
 files:
-  - url: Nano-Video-Downloader-Setup-1.0.0.exe
-    sha512: HXjM7YghwreZsa3asYP2uzHfIoMdh2U+t6mXRvipfKV18+nREGGtSslqFNFRjdokB2DwLJoG5FL5NpD9PTA6Cw==
-    size: 156915533
-path: Nano-Video-Downloader-Setup-1.0.0.exe
-sha512: HXjM7YghwreZsa3asYP2uzHfIoMdh2U+t6mXRvipfKV18+nREGGtSslqFNFRjdokB2DwLJoG5FL5NpD9PTA6Cw==
-releaseDate: '2026-11-12T17:43:47.196Z'
+  - url: Nano-Video-Downloader-Setup-1.1.0.exe
+    sha512: avLUX2usbZmNhVRUHRxQUN41HfWyu/j/45Gq6vRKR5zqX4QZh3xJOulFEI88pTT2ByM7HuCYq11nE9H2uZ08hQ==
+    size: 155995665
+path: Nano-Video-Downloader-Setup-1.1.0.exe
+sha512: avLUX2usbZmNhVRUHRxQUN41HfWyu/j/45Gq6vRKR5zqX4QZh3xJOulFEI88pTT2ByM7HuCYq11nE9H2uZ08hQ==
+releaseDate: '2026-11-14T19:34:55.046Z'

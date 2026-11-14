@@ -23,9 +23,9 @@ Esta é a opção mais simples e rápida. **Não requer** a instalação de Node
 
 1. **Baixar o Instalador:**
    - Faça o download do arquivo executável disponível na pasta [`release/`](./release/) do repositório:
-     - 📥 **`Nano Video Downloader Setup 1.0.0.exe`**
+     - 📥 **`Nano Video Downloader Setup 1.1.0.exe`**
 2. **Executar a Instalação:**
-   - Dê um duplo clique no executável `Nano Video Downloader Setup 1.0.0.exe`.
+   - Dê um duplo clique no executável `Nano Video Downloader Setup 1.1.0.exe`.
    - Caso o Windows SmartScreen exiba um aviso de segurança por ser um executável recente, clique em **"Mais informações"** e em seguida em **"Executar assim mesmo"**.
    - O assistente de instalação (NSIS) configurará o aplicativo automaticamente.
 3. **Pronto para Usar:**
