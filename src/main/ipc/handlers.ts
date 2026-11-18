@@ -61,6 +61,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
+  ipcMain.handle('catalog:unlockCourseLessons', (_event, courseId: string) => {
+    const unlockedCount = deps.db.unlockCourseLessons(courseId);
+    return { unlockedCount };
+  });
+
   ipcMain.handle('catalog:auditCourseSync', async (_event, courseId: string) => {
     return deps.syncAuditor.auditCourseSync(courseId);
   });

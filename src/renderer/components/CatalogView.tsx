@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Search,
   Square,
+  Unlock,
 } from 'lucide-react';
 import {
   CourseRecord,
@@ -56,6 +57,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [auditResult, setAuditResult] = useState<CourseSyncAuditResult | null>(null);
   const [isAuditing, setIsAuditing] = useState<boolean>(false);
   const [isDownloadingPending, setIsDownloadingPending] = useState<boolean>(false);
+  const [isUnlocking, setIsUnlocking] = useState<boolean>(false);
 
   const handleAuditCourse = async (courseId?: string) => {
     const id = courseId || selectedCourse?.course.id;
@@ -115,6 +117,13 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     setStatusMsg(null);
     setAuditResult(null);
     try {
+      if (course.licenseStatus === 'AUTHORIZED') {
+        try {
+          await window.antigravity.catalog.unlockCourseLessons(course.id);
+        } catch {
+          // ignore
+        }
+      }
       const details = await window.antigravity.catalog.getCourseDetails(course.id, forceRemote);
       setSelectedCourse(details);
       setSelectedLessonIds(new Set());
@@ -123,6 +132,26 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
       setStatusMsg(err instanceof Error ? err.message : 'Erro ao carregar módulos do curso.');
     } finally {
       setLoadingCourseId(null);
+    }
+  };
+
+  const handleUnlockCourse = async () => {
+    if (!selectedCourse) return;
+    setIsUnlocking(true);
+    setStatusMsg('Liberando aulas programadas / bloqueadas deste curso...');
+    try {
+      const res = await window.antigravity.catalog.unlockCourseLessons(selectedCourse.course.id);
+      const details = await window.antigravity.catalog.getCourseDetails(selectedCourse.course.id, false);
+      setSelectedCourse(details);
+      setStatusMsg(
+        res.unlockedCount > 0
+          ? `Sucesso! ${res.unlockedCount} aula(s) liberada(s) para download!`
+          : 'Todas as aulas deste curso já estão liberadas para download.',
+      );
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Erro ao liberar aulas do curso.');
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
@@ -306,8 +335,10 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     availabilityStatus: string;
     attachments?: unknown[];
   }) => {
-    if (lesson.availabilityStatus !== 'AVAILABLE') return false;
-    return downloadVideos || downloadAttachments;
+    if (lesson.availabilityStatus === 'DRM_UNSUPPORTED') return false;
+    const canVideo = downloadVideos && lesson.hasVideo;
+    const canAttachment = downloadAttachments;
+    return canVideo || canAttachment;
   };
 
   const allAvailableLessonIds =
@@ -460,7 +491,17 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                 os materiais disponíveis na aba "Materiais" de cada aula serão baixados automaticamente para a pasta Materiais.
               </p>
             </div>
-            <div className="row-gap">
+            <div className="row-gap" style={{ flexWrap: 'wrap' }}>
+              <button
+                className="btn"
+                style={{ fontSize: 13 }}
+                disabled={isUnlocking}
+                onClick={() => void handleUnlockCourse()}
+                title="Libera todas as aulas programadas / bloqueadas deste curso para download imediato"
+              >
+                <Unlock size={14} className={isUnlocking ? 'spin' : ''} />
+                {isUnlocking ? 'Liberando...' : 'Liberar Todas as Aulas'}
+              </button>
               <button
                 className="btn"
                 disabled={!online || allAvailableLessonIds.length === 0}

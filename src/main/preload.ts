@@ -42,6 +42,8 @@ const bridge: NanoElectronBridge = {
       resolution: ResolutionOption,
       options?: { downloadVideos?: boolean; downloadAttachments?: boolean },
     ) => ipcRenderer.invoke('catalog:downloadPending', courseId, resolution, options),
+    unlockCourseLessons: (courseId: string) =>
+      ipcRenderer.invoke('catalog:unlockCourseLessons', courseId),
   },
   queue: {
     listJobs: () => ipcRenderer.invoke('queue:listJobs'),

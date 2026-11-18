@@ -57,6 +57,18 @@ export class VaultDatabase {
         WHERE account_id NOT IN (SELECT id FROM accounts WHERE status = 'CONNECTED')
           AND (SELECT count(*) FROM accounts WHERE status = 'CONNECTED') > 0;
       `);
+
+      // 3. Desbloqueia automaticamente aulas retidas em LOCKED_DRIP para cursos autorizados
+      this.db.exec(`
+        UPDATE lessons
+        SET availability_status = 'AVAILABLE'
+        WHERE availability_status = 'LOCKED_DRIP'
+          AND module_id IN (
+            SELECT m.id FROM modules m
+            JOIN courses c ON m.course_id = c.id
+            WHERE c.license_status = 'AUTHORIZED'
+          );
+      `);
     } catch {
       // Ignore if table doesn't exist yet
     }
@@ -388,6 +400,24 @@ export class VaultDatabase {
     });
 
     return { course, modules };
+  }
+
+  unlockCourseLessons(courseId: string): number {
+    const res = this.db
+      .prepare(
+        `UPDATE lessons
+         SET availability_status = 'AVAILABLE'
+         WHERE availability_status = 'LOCKED_DRIP'
+           AND module_id IN (SELECT id FROM modules WHERE course_id = ?)`,
+      )
+      .run(courseId);
+    return Number(res.changes);
+  }
+
+  updateLessonAvailability(lessonId: string, status: LessonAvailability): void {
+    this.db
+      .prepare('UPDATE lessons SET availability_status = ? WHERE id = ?')
+      .run(status, lessonId);
   }
 
   listOfflineCourses(): CourseTreeDetails[] {

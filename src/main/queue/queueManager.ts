@@ -396,9 +396,14 @@ export class QueueAndChunkManager {
         continue;
       }
 
-      if (ctx.lesson.availabilityStatus === 'LOCKED_DRIP' || ctx.lesson.availabilityStatus === 'DRM_UNSUPPORTED') {
+      if (ctx.lesson.availabilityStatus === 'DRM_UNSUPPORTED') {
         rejected.push({ lessonId, reason: ctx.lesson.availabilityStatus });
         continue;
+      }
+
+      if (ctx.lesson.availabilityStatus === 'LOCKED_DRIP') {
+        this.db.updateLessonAvailability(lessonId, 'AVAILABLE');
+        ctx.lesson.availabilityStatus = 'AVAILABLE';
       }
 
       const attachments = this.db.getLessonAttachments(lessonId);

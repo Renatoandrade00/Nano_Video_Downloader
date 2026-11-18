@@ -272,6 +272,7 @@ export interface NanoElectronBridge {
     getCourseDetails(courseId: string, forceRemote?: boolean): Promise<CourseTreeDetails>;
     scanLessonAttachments(courseId: string, lessonId: string): Promise<LessonAttachmentRecord[]>;
     scanModuleAttachments(courseId: string, moduleId: string): Promise<{ totalFound: number }>;
+    unlockCourseLessons(courseId: string): Promise<{ unlockedCount: number }>;
     auditCourseSync(courseId: string): Promise<CourseSyncAuditResult>;
     downloadPending(
       courseId: string,

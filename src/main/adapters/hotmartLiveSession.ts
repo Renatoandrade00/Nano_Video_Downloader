@@ -709,8 +709,8 @@ export async function fetchLiveHotmartCatalog(
     const deadline = startMs + 16000;
     while (Date.now() < deadline) {
       const currentUrl = win.webContents.getURL();
-      if (/sso\.hotmart\.com\/login/i.test(currentUrl)) {
-        throw new Error('Sessão Hotmart expirada ao abrir Hotmart Club.');
+      if (/sso\.hotmart\.com\/login/i.test(currentUrl) && Date.now() - startMs > 6000) {
+        throw new Error('Sessão Hotmart expirada ao abrir Hotmart Club. Por favor, acesse Contas & Cofre e reconecte sua conta.');
       }
 
       const jsonTree = extractClubTreeFromJson(
